@@ -185,6 +185,8 @@ export default function App() {
 
 // --- Main Application Logic (after login) ---
 function MainApp({ currentUser, userProfile, setUserProfile, auth, db, isAdmin, isGameMaker, appId }) {
+    // All your state variables should be defined at the top level of MainApp
+    const [view, setView] = useState('game');
     const [players, setPlayers] = useState([]);
     const [transactionLog, setTransactionLog] = useState([]);
     const [newPlayerName, setNewPlayerName] = useState('');
@@ -196,7 +198,6 @@ function MainApp({ currentUser, userProfile, setUserProfile, auth, db, isAdmin, 
     const [expandedSummaryPlayerId, setExpandedSummaryPlayerId] = useState(null);
     const [showConsole, setShowConsole] = useState(false);
     const [userIp, setUserIp] = useState('unknown');
-    const [view, setView] = useState('game'); // 'game', 'blinds', 'admin', 'stats', 'profile'
     const [quickAddPlayers, setQuickAddPlayers] = useState(['test1', 'test2']);
     
     // Session State
@@ -859,7 +860,8 @@ function MainApp({ currentUser, userProfile, setUserProfile, auth, db, isAdmin, 
       const NoQrCodeModalContent = () => { const { from, to, amount } = modal.data; return (<div className="text-center form-group-stack"> <AlertTriangle className="icon-lg text-yellow"/> <h3>No PromptPay ID for <strong>{to}</strong></h3> <p>Please have <strong>{from}</strong> transfer <strong>{formatMoney(amount)}</strong> manually.</p> <Button onClick={closeModal} variant="primary">OK</Button> </div>); };
       const ConsoleLog = () => ( <div className={`console-log ${showConsole ? 'show' : ''}`}> <div> <div className="console-header"> <h3>Transaction Log</h3> <button onClick={() => setShowConsole(false)}><X size={24}/></button> </div> <ul className="console-body"> {transactionLog.map(log => ( <li key={log.id}> <span>{new Date(log.timestamp).toLocaleTimeString()}:</span> {log.ip && <span className="log-ip">[{log.ip}]</span>} <span className="log-type">{log.type}</span> {log.player && <span>Player: {log.player}</span>} {log.amount && <span>Amount: {log.amount}</span>} {log.source && <span>Source: {log.source}</span>} {log.message && <span>{log.message}</span>} </li> ))} </ul> </div> </div> );
 
-    const renderStatsView = () => {
+    const StatsView = () => {
+        // Now hooks are at the top level of this component
         const [statsData, setStatsData] = useState([]);
         const [isLoading, setIsLoading] = useState(true);
         
