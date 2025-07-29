@@ -540,6 +540,18 @@ function MainApp({ currentUser, userProfile, setUserProfile, auth, db, isAdmin, 
     const totalBuyInFromBox = useMemo(() => players.reduce((sum, p) => sum + p.buyIn, 0), [players]);
     const hasJoined = useMemo(() => players.some(p => p.uid === currentUser.uid), [players, currentUser.uid]);
 
+    // First, add this useEffect to listen for game state changes
+    useEffect(() => {
+        if (sessionActive && sessionData?.gameState === 'awaiting_counts') {
+            // Show appropriate UI based on user role
+            if (isAdmin || isGameMaker) {
+                setView('final-counts-admin');
+            } else {
+                setView('final-counts-player');
+            }
+        }
+    }, [sessionActive, sessionData?.gameState, isAdmin, isGameMaker]);
+
     // --- Render Functions ---
     const renderAdminPanel = () => {
         return (
@@ -559,6 +571,74 @@ function MainApp({ currentUser, userProfile, setUserProfile, auth, db, isAdmin, 
     };
     
     const renderBlindsTimer = () => {
+        const [currentLevel, setCurrentLevel] = useState(0);
+        const [timeLeft, setTimeLeft] = useState(sessionData?.timerDuration || 480);
+        const [isRunning, setIsRunning] = useState(false);
+        const timerRef = useRef(null);
+        
+        useEffect(() => {
+            // Initialize timer with session data
+            if (sessionData?.timerDuration) {
+                setTimeLeft(sessionData.timerDuration);
+            }
+            
+            // Cleanup timer on unmount
+            return () => {
+                if (timerRef.current) clearInterval(timerRef.current);
+            };
+        }, [sessionData]);
+        
+        const startTimer = () => {
+            if (timerRef.current) clearInterval(timerRef.current);
+            setIsRunning(true);
+            timerRef.current = setInterval(() => {
+                setTimeLeft(prev => {
+                    if (prev <= 1) {
+                        // Move to next level when timer expires
+                        setCurrentLevel(current => {
+                            const nextLevel = current + 1;
+                            if (sessionData?.blinds && nextLevel < sessionData.blinds.length) {
+                                return nextLevel;
+                            }
+                            // Stop at max level
+                            clearInterval(timerRef.current);
+                            setIsRunning(false);
+                            return current;
+                        });
+                        return sessionData?.timerDuration || 480;
+                    }
+                    return prev - 1;
+                });
+            }, 1000);
+        };
+        
+        const pauseTimer = () => {
+            if (timerRef.current) {
+                clearInterval(timerRef.current);
+                setIsRunning(false);
+            }
+        };
+        
+        const resetTimer = () => {
+            if (timerRef.current) clearInterval(timerRef.current);
+            setIsRunning(false);
+            setTimeLeft(sessionData?.timerDuration || 480);
+        };
+        
+        const formatTime = (seconds) => {
+            const minutes = Math.floor(seconds / 60);
+            const secs = seconds % 60;
+            return `${minutes}:${secs < 10 ? '0' : ''}${secs}`;
+        };
+        
+        const blindLevels = sessionData?.blinds || [
+            { sb: 5, bb: 10 }, { sb: 10, bb: 20 }, { sb: 15, bb: 30 },
+            { sb: 20, bb: 40 }, { sb: 25, bb: 50 }, { sb: 30, bb: 60 }
+        ];
+        
+        const currentBlinds = blindLevels[Math.min(currentLevel, blindLevels.length - 1)];
+        const nextBlinds = currentLevel < blindLevels.length - 1 ? blindLevels[currentLevel + 1] : null;
+        
         return (
             <Card>
                 <h2 className="section-title"><Timer className="icon"/> Blinds Timer</h2>
@@ -566,18 +646,34 @@ function MainApp({ currentUser, userProfile, setUserProfile, auth, db, isAdmin, 
                     <ArrowLeft className="icon"/> Back to Game
                 </Button>
                 
-                {/* Blinds timer content here */}
                 <div className="blinds-timer-display">
                     <div className="blinds-info">
-                        <h2>Current Level</h2>
-                        <div className="current-blinds">10/20</div>
-                        <div className="next-blinds">Next: 20/40</div>
+                        <h3>Current Level: {currentLevel + 1}</h3>
+                        <div className="current-blinds">{currentBlinds.sb}/{currentBlinds.bb}</div>
+                        {nextBlinds && <div className="next-blinds">Next: {nextBlinds.sb}/{nextBlinds.bb}</div>}
                     </div>
-                    <div className="timer-clock">15:00</div>
+                    <div className="timer-clock">{formatTime(timeLeft)}</div>
                     <div className="timer-controls">
-                        <Button variant="primary">Start</Button>
-                        <Button variant="secondary">Pause</Button>
-                        <Button variant="secondary">Reset</Button>
+                        {!isRunning ? (
+                            <Button onClick={startTimer} variant="primary"><Play className="icon"/> Start</Button>
+                        ) : (
+                            <Button onClick={pauseTimer} variant="secondary"><Pause className="icon"/> Pause</Button>
+                        )}
+                        <Button onClick={resetTimer} variant="secondary"><RefreshCw className="icon"/> Reset</Button>
+                        <Button 
+                            onClick={() => setCurrentLevel(prev => Math.min(prev + 1, blindLevels.length - 1))} 
+                            variant="secondary"
+                            disabled={currentLevel >= blindLevels.length - 1}
+                        >
+                            <SkipForward className="icon"/> Next Level
+                        </Button>
+                        <Button 
+                            onClick={() => setCurrentLevel(prev => Math.max(0, prev - 1))} 
+                            variant="secondary"
+                            disabled={currentLevel === 0}
+                        >
+                            <SkipBack className="icon"/> Prev Level
+                        </Button>
                     </div>
                 </div>
             </Card>
@@ -844,47 +940,53 @@ function renderStatsView() {
     useEffect(() => {
         const fetchStats = async () => {
             setIsLoading(true);
-            // Fetch all completed sessions
-            const sessionsRef = collection(db, `artifacts/${appId}/public/data/poker-sessions`);
-            const q = query(sessionsRef, where('gameState', '==', 'finished'));
-            const querySnapshot = await getDocs(q);
-            
-            // Collect player stats
-            const playerStats = {};
-            querySnapshot.forEach(doc => {
-                const session = doc.data();
-                if (session.finalCalculations?.players) {
-                    session.finalCalculations.players.forEach(player => {
-                        if (!playerStats[player.name]) {
-                            playerStats[player.name] = {
-                                name: player.name,
-                                totalGames: 0,
-                                totalProfit: 0,
-                                wins: 0,
-                                losses: 0
-                            };
-                        }
-                        
-                        playerStats[player.name].totalGames++;
-                        playerStats[player.name].totalProfit += player.balance;
-                        
-                        if (player.balance > 0) {
-                            playerStats[player.name].wins++;
-                        } else if (player.balance < 0) {
-                            playerStats[player.name].losses++;
-                        }
-                    });
-                }
-            });
-            
-            // Convert to array and sort by profit
-            const statsArray = Object.values(playerStats).sort((a, b) => b.totalProfit - a.totalProfit);
-            setStatsData(statsArray);
-            setIsLoading(false);
+            try {
+                // Fetch all completed sessions
+                const sessionsRef = collection(db, `artifacts/${appId}/public/data/poker-sessions`);
+                const q = query(sessionsRef, where('gameState', '==', 'finished'));
+                const querySnapshot = await getDocs(q);
+                
+                // Collect player stats
+                const playerStats = {};
+                querySnapshot.forEach(doc => {
+                    const session = doc.data();
+                    if (session.finalCalculations?.players) {
+                        session.finalCalculations.players.forEach(player => {
+                            if (!playerStats[player.name]) {
+                                playerStats[player.name] = {
+                                    name: player.name,
+                                    totalGames: 0,
+                                    totalProfit: 0,
+                                    wins: 0,
+                                    losses: 0
+                                };
+                            }
+                            
+
+                            playerStats[player.name].totalGames++;
+                            playerStats[player.name].totalProfit += player.balance;
+                            
+                            if (player.balance > 0) {
+                                playerStats[player.name].wins++;
+                            } else if (player.balance < 0) {
+                                playerStats[player.name].losses++;
+                            }
+                        });
+                    }
+                });
+                
+                // Convert to array and sort by profit
+                const statsArray = Object.values(playerStats).sort((a, b) => b.totalProfit - a.totalProfit);
+                setStatsData(statsArray);
+            } catch (error) {
+                console.error("Error fetching stats:", error);
+            } finally {
+                setIsLoading(false);
+            }
         };
         
         fetchStats();
-    }, [db, appId]);
+    }, []);
     
     return (
         <Card>
@@ -961,14 +1063,17 @@ function ProfileModalContent({ currentUser, userProfile, setUserProfile, db, app
             setNotificationStatus(permission);
             
             if (permission === 'granted') {
-                // Register the service worker if it's not already registered
+                // Get VAPID public key from environment variable
+                const vapidPublicKey = import.meta.env.VITE_VAPID_PUBLIC_KEY;
+                
+                if (!vapidPublicKey) {
+                    throw new Error("VAPID public key is not configured in environment variables.");
+                }
+                
+                // Register the service worker
                 const registration = await navigator.serviceWorker.ready;
                 
-                // Get the VAPID public key from your Firebase config or a constant
-                // This should be set in your environment or app config
-                const vapidPublicKey = 'YOUR_VAPID_PUBLIC_KEY_HERE'; 
-                
-                // Subscribe to push notifications
+                // Subscribe to push notifications with correct key
                 const subscription = await registration.pushManager.subscribe({
                     userVisibleOnly: true,
                     applicationServerKey: urlBase64ToUint8Array(vapidPublicKey)
@@ -990,7 +1095,11 @@ function ProfileModalContent({ currentUser, userProfile, setUserProfile, db, app
             }
         } catch (error) {
             console.error('Error enabling notifications:', error);
-            alert(`Failed to enable notifications: ${error.message}`);
+            if (error.message.includes('applicationServerKey')) {
+                alert('Failed to enable notifications: Invalid server key. Add VITE_VAPID_PUBLIC_KEY to your environment variables.');
+            } else {
+                alert(`Failed to enable notifications: ${error.message}`);
+            }
         } finally {
             setIsEnablingNotifications(false);
         }
