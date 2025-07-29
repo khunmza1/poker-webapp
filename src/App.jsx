@@ -6,7 +6,14 @@ import { getFirestore, doc, setDoc, onSnapshot, getDoc, collection, query, where
 
 // --- Firebase Configuration ---
 // This now safely reads from your Vercel Environment Variables
-const firebaseConfig = JSON.parse(import.meta.env.VITE_FIREBASE_CONFIG || '{}');
+const firebaseConfig = {
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID
+};
 
 // --- Helper Components (Now styled via CSS file) ---
 const Card = ({ children, className = '' }) => ( <div className={`card ${className}`}>{children}</div> );
