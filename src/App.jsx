@@ -580,7 +580,14 @@ function MainApp({ currentUser, userProfile, setUserProfile, auth, db, isAdmin, 
   };
 
   const renderAddPlayerForm = () => ( <Card> <h2 className="section-title"><Users className="icon"/>Add Guest Players</h2> <form className="add-player-form" onSubmit={(e) => handleAddPlayer(e, 400)}> <input type="text" value={newPlayerName} onChange={(e) => setNewPlayerName(e.target.value)} placeholder="Enter guest's name"/> <div className="button-group"> <Button onClick={(e) => handleAddPlayer(e, 0)} variant="secondary" disabled={!newPlayerName.trim()}>Add Guest</Button> <Button type="submit" variant="primary" disabled={!newPlayerName.trim()}>Add Guest & Buy-in 400</Button> </div> </form> <div className="quick-add-section"> <h3>Quick Add Guests</h3> <div className="quick-add-grid"> {quickAddPlayers.map(name => ( <Button key={name} onClick={() => handleQuickAdd(name)} variant="success" disabled={players.some(p => p.name === name)}> <Plus size={16} className="icon"/> {name} </Button> ))} </div> </div> </Card> );
-  const renderPlayerList = () => ( <Card> <h2 className="section-title">Lobby & Game</h2> <div className="player-list"> {players.map(player => ( <div key={player.id} className={`player-list-item ${player.uid === currentUser.uid ? 'is-current-user' : ''}`}> <div className="player-list-item-header"> <div className="player-name-group"> <button onClick={() => togglePlayerExpansion(player.id)} className="player-name-btn"> {player.name} {player.status === 'joined' ? <span className="status-dot joined"></span> : <span className="status-dot guest"></span>} {expandedPlayerId === player.id ? <ChevronUp className="icon-sm"/> : <ChevronDown className="icon-sm"/>} </button> {isAdmin && <Button onClick={() => toggleQuickAdd(player.name)} variant="secondary" className={`promptpay-btn ${quickAddPlayers.includes(player.name) ? 'is-quick-add' : ''}`}><Star size={14}/></Button>} <Button onClick={() => openModal('edit-player', player)} variant="secondary" className="promptpay-btn">PromptPay ID</Button> </div> <div className="player-info-group"> <span>Net Buy-in: <strong>{player.buyIn} chips</strong></span> <div className="button-group"> {player.status === 'guest' && !hasJoined && <Button onClick={() => openModal('self-buy-in', { player })} variant="success">Join Game</Button>} {(isAdmin || isGameMaker) && <> <Button onClick={() => openModal('buy-in', player)} variant="primary">Buy Chips</Button> <Button onClick={() => openModal('cash-out', player)} variant="secondary" disabled={player.buyIn <= 0}>Cash Out</Button> </>} </div> </div> </div> {expandedPlayerId === player.id && ( <div className="transaction-history-container"> <h4>Transaction History</h4> <ul> {transactionLog.filter(log => log.player === player.name || (log.source && log.source.includes(player.name))).map(log => { if (log.source && log.source.includes(player.name)) { return ( <li key={log.id} className="log-sold"> <span>{new Date(log.timestamp).toLocaleTimeString()} - Sold Chips</span> <span>{log.amount && `${log.amount} chips`} (to {log.player})</span> </li> ); } let logClass = ''; if (log.type.includes('Buy-in')) { logClass = log.source === 'Central Box' ? 'log-buy-box' : 'log-buy-player'; } else if (log.type === 'Cash Out') { logClass = 'log-cashout'; } return ( <li key={log.id} className={logClass}> <span>{new Date(log.timestamp).toLocaleTimeString()} - {log.type}</span> <span>{log.amount && `${log.amount} chips`} {log.source && `(${log.source})`}</span> </li> ); })} </ul> </div> )} </div> ))} </div> <div className="game-summary-footer"> <h3>Total in Play (from Box): <span className="text-green">{totalBuyInFromBox} chips</span></h3> {(isAdmin || isGameMaker) && <Button onClick={() => { const sessionRef = doc(db, `artifacts/${appId}/public/data/poker-sessions`, sessionId); updateDoc(sessionRef, { gameState: 'awaiting_counts' }); }} variant="danger" disabled={players.length < 2}> <Calculator className="icon"/> End Game </Button>} </div> </Card> );
+  const renderPlayerList = () => ( <Card> <h2 className="section-title">Lobby & Game</h2> <div className="player-list"> {players.map(player => ( <div key={player.id} className={`player-list-item ${player.uid === currentUser.uid ? 'is-current-user' : ''}`}> <div className="player-list-item-header"> <div className="player-name-group"> <button onClick={() => togglePlayerExpansion(player.id)} className="player-name-btn"> {player.name} {player.status === 'joined' ? <span className="status-dot joined"></span> : <span className="status-dot guest"></span>} {expandedPlayerId === player.id ? <ChevronUp className="icon-sm"/> : <ChevronDown className="icon-sm"/>} </button> {isAdmin && <Button onClick={() => toggleQuickAdd(player.name)} variant="secondary" className={`promptpay-btn ${quickAddPlayers.includes(player.name) ? 'is-quick-add' : ''}`}><Star size={14}/></Button>} <Button onClick={() => openModal('edit-player', player)} variant="secondary" className="promptpay-btn">PromptPay ID</Button> </div> <div className="player-info-group"> <span>Net Buy-in: <strong>{player.buyIn} chips</strong></span> <div className="button-group"> {player.status === 'guest' && !hasJoined && <Button onClick={() => openModal('self-buy-in', { player })} variant="success">Join Game</Button>} {((isAdmin || isGameMaker) || (player.uid === currentUser.uid && player.status === 'joined')) && <> <Button onClick={() => openModal('buy-in', player)} variant="primary">Buy Chips</Button> {(isAdmin || isGameMaker) && <Button onClick={() => openModal('cash-out', player)} variant="secondary" disabled={player.buyIn <= 0}>Cash Out</Button>} </>} </div> </div> </div> {expandedPlayerId === player.id && ( <div className="transaction-history-container"> <h4>Transaction History</h4> <ul> {transactionLog.filter(log => log.player === player.name || (log.source && log.source.includes(player.name))).map(log => { if (log.source && log.source.includes(player.name)) { return ( <li key={log.id} className="log-sold"> <span>{new Date(log.timestamp).toLocaleTimeString()} - Sold Chips</span> <span>{log.amount && `${log.amount} chips`} (to {log.player})</span> </li> ); } let logClass = ''; if (log.type.includes('Buy-in')) { logClass = log.source === 'Central Box' ? 'log-buy-box' : 'log-buy-player'; } else if (log.type === 'Cash Out') { logClass = 'log-cashout'; } return ( <li key={log.id} className={logClass}> <span>{new Date(log.timestamp).toLocaleTimeString()} - {log.type}</span> <span>{log.amount && `${log.amount} chips`} {log.source && `(${log.source})`}</span> </li> ); })} </ul> </div> )} </div> ))} </div> <div className="game-summary-footer"> <h3>Total in Play (from Box): <span className="text-green">{totalBuyInFromBox} chips</span></h3> {(isAdmin || isGameMaker) && <Button onClick={() => { 
+  // Update the game state in Firestore
+  const sessionRef = doc(db, `artifacts/${appId}/public/data/poker-sessions`, sessionId); 
+  updateDoc(sessionRef, { gameState: 'awaiting_counts' });
+  
+  // Open the end game modal
+  openModal('end-game');
+}} variant="danger" disabled={players.length < 2}> <Calculator className="icon"/> End Game </Button>} </div> </Card> );
   const renderSummary = () => ( <Card className="summary-card"> <h2 className="summary-title">Game Over: Final Tally</h2> <p className="session-id-summary">Session ID: {sessionId}</p> <h3 className="section-title">Player Results</h3> <div className="player-results-list"> {finalCalculations.players.map(player => ( <div key={player.id} className="player-result-item"> <button onClick={() => toggleSummaryExpansion(player.id)} className="player-result-header"> <div> <span>{player.name}</span> <div className="player-result-details">Net Buy-in: {player.buyIn} chips | Final: {player.finalChips} chips</div> </div> <div className="player-result-balance-group"> <span className={player.balance >= 0 ? 'text-green' : 'text-red'}> {player.balance >= 0 ? `+ ${formatMoney(player.balance)}` : `- ${formatMoney(Math.abs(player.balance))}`} </span> {expandedSummaryPlayerId === player.id ? <ChevronUp className="icon-sm"/> : <ChevronDown className="icon-sm"/>} </div> </button> {expandedSummaryPlayerId === player.id && ( <div className="transaction-history-container"> <h4>Transaction History</h4> <ul> {transactionLog.filter(log => log.player === player.name || (log.source && log.source.includes(player.name))).map(log => { if (log.source && log.source.includes(player.name)) { return ( <li key={log.id} className="log-sold"> <span>{new Date(log.timestamp).toLocaleTimeString()} - Sold Chips</span> <span>{log.amount && `${log.amount} chips`} (to {log.player})</span> </li> ); } let logClass = ''; if (log.type.includes('Buy-in')) { logClass = log.source === 'Central Box' ? 'log-buy-box' : 'log-buy-player'; } else if (log.type === 'Cash Out') { logClass = 'log-cashout'; } return ( <li key={log.id} className={logClass}> <span>{new Date(log.timestamp).toLocaleTimeString()} - {log.type}</span> <span>{log.amount && `${log.amount} chips`} {log.source && `(${log.source})`}</span> </li> ); })} </ul> </div> )} </div> ))} </div> <h3 className="section-title">Settlement Transactions</h3> <div className="settlement-list"> {finalCalculations.transactions.map((t, index) => { const recipient = players.find(p => p.name === t.to); const hasPromptPay = recipient && recipient.promptpayId; const qrUrl = hasPromptPay ? `https://promptpay.io/${recipient.promptpayId}/${(t.amount * chipValue).toFixed(2)}` : ''; return ( <button key={index} onClick={() => { if(hasPromptPay) { openModal('show-qr', { url: qrUrl, from: t.from, to: t.to, amount: t.amount }) } else { openModal('no-qr', { from: t.from, to: t.to, amount: t.amount }) } }} className="settlement-item"> <span className="text-red">{t.from}</span> <ArrowRight className="icon-sm" /> <span className="text-green">{t.to}</span> <ArrowRight className="icon-sm" /> <span>{formatMoney(t.amount)}</span> </button> );})} </div> <div className="summary-actions"> <Button onClick={handleBackToGame} variant="secondary"> <ArrowLeft className="icon"/> Back to Game </Button> <Button onClick={resetGame} variant="primary"> <Eraser className="icon"/> Start New Session </Button> </div> </Card> );
   const BuyInModalContent = () => {
     const [amount, setAmount] = useState('400');
@@ -725,6 +732,7 @@ function MainApp({ currentUser, userProfile, setUserProfile, auth, db, isAdmin, 
             <div className="header-actions">
               <Button onClick={() => openModal('profile')} variant="secondary" className="stats-btn"><UserIcon/></Button>
               {isAdmin && <Button onClick={() => setView('admin')} variant="secondary" className="stats-btn"><Crown/></Button>}
+              <Button onClick={() => setView('stats')} variant="secondary" className="stats-btn"><BarChart2 className="icon"/></Button>
               <Button onClick={() => setView('blinds')} variant="secondary" className="stats-btn" disabled={!sessionActive}><Timer/></Button>
               <Button onClick={() => openModal('settings')} variant="secondary" className="settings-btn"><Settings/></Button>
               <Button onClick={() => signOut(auth)} variant="danger" className="logout-btn"><LogOut/></Button>
@@ -733,7 +741,17 @@ function MainApp({ currentUser, userProfile, setUserProfile, auth, db, isAdmin, 
 
       </header>
       <main>
-          {!sessionActive ? ( renderSessionManager() ) : finalCalculations ? ( renderSummary() ) : (
+          {view === 'admin' ? (
+              renderAdminPanel()
+          ) : view === 'blinds' ? (
+              renderBlindsTimer()
+          ) : view === 'stats' ? (
+              renderStatsView()
+          ) : !sessionActive ? (
+              renderSessionManager()
+          ) : finalCalculations ? (
+              renderSummary()
+          ) : (
               <>
                   {isLoadingSession ? <p className="loading-text">Loading Session...</p> : 
                   <>
@@ -772,29 +790,87 @@ function MainApp({ currentUser, userProfile, setUserProfile, auth, db, isAdmin, 
 }
 
 
-// --- Profile Modal Content ---
-function ProfileModalContent({ currentUser, userProfile, setUserProfile, db, appId, closeModal }) {
-    const [displayName, setDisplayName] = useState(userProfile?.displayName || '');
-
-    const handleSave = async () => {
-        const userDocRef = doc(db, `artifacts/${appId}/public/data/users/${currentUser.uid}`);
-        const newProfile = { ...userProfile, displayName };
-        await setDoc(userDocRef, newProfile, { merge: true });
-        setUserProfile(newProfile);
-        closeModal();
-    };
-
+// --- Main Application Logic (after login) ---
+function renderStatsView() {
+    const [statsData, setStatsData] = useState([]);
+    const [isLoading, setIsLoading] = useState(true);
+    
+    useEffect(() => {
+        const fetchStats = async () => {
+            setIsLoading(true);
+            // Fetch all completed sessions
+            const sessionsRef = collection(db, `artifacts/${appId}/public/data/poker-sessions`);
+            const q = query(sessionsRef, where('gameState', '==', 'finished'));
+            const querySnapshot = await getDocs(q);
+            
+            // Collect player stats
+            const playerStats = {};
+            querySnapshot.forEach(doc => {
+                const session = doc.data();
+                if (session.finalCalculations?.players) {
+                    session.finalCalculations.players.forEach(player => {
+                        if (!playerStats[player.name]) {
+                            playerStats[player.name] = {
+                                name: player.name,
+                                totalGames: 0,
+                                totalProfit: 0,
+                                wins: 0,
+                                losses: 0
+                            };
+                        }
+                        
+                        playerStats[player.name].totalGames++;
+                        playerStats[player.name].totalProfit += player.balance;
+                        
+                        if (player.balance > 0) {
+                            playerStats[player.name].wins++;
+                        } else if (player.balance < 0) {
+                            playerStats[player.name].losses++;
+                        }
+                    });
+                }
+            });
+            
+            // Convert to array and sort by profit
+            const statsArray = Object.values(playerStats).sort((a, b) => b.totalProfit - a.totalProfit);
+            setStatsData(statsArray);
+            setIsLoading(false);
+        };
+        
+        fetchStats();
+    }, [db, appId]);
+    
     return (
-        <div className="form-group-stack">
-            <div className="form-group">
-                <label>Display Name</label>
-                <input type="text" value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
-            </div>
-            <div className="form-group">
-                <label>User ID (for Admin setup)</label>
-                <input type="text" value={currentUser.uid} readOnly />
-            </div>
-            <Button onClick={handleSave} variant="primary">Save Profile</Button>
-        </div>
+        <Card>
+            <h2 className="section-title">Player Leaderboard</h2>
+            <Button onClick={() => setView('game')} variant="secondary" className="back-btn">
+                <ArrowLeft className="icon"/> Back to Game
+            </Button>
+            
+            {isLoading ? (
+                <p className="loading-text">Loading stats...</p>
+            ) : statsData.length === 0 ? (
+                <p>No game data available yet.</p>
+            ) : (
+                <div className="stats-table">
+                    <div className="stats-header">
+                        <div className="stats-cell">Player</div>
+                        <div className="stats-cell">Games</div>
+                        <div className="stats-cell">Win/Loss</div>
+                        <div className="stats-cell">Total Profit</div>
+                    </div>
+                    {statsData.map(player => (
+                        <div key={player.name} className="stats-row">
+                            <div className="stats-cell">{player.name}</div>
+                            <div className="stats-cell">{player.totalGames}</div>
+                            <div className="stats-cell">{player.wins}/{player.losses}</div>
+                            <div className={`stats-cell ${player.totalProfit >= 0 ? 'text-green' : 'text-red'}`}>
+                                {player.totalProfit >= 0 ? '+' : ''}{formatMoney(player.totalProfit)}
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            )}
+        </Card>
     );
-}
+};
