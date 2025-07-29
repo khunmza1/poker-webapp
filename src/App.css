@@ -399,3 +399,42 @@ footer button:hover { color: var(--color-brand-hover); }
 .back-btn {
     margin-bottom: 1rem;
 }
+
+/* Stats Table */
+.stats-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 1rem;
+}
+
+.stats-header, .stats-row {
+    display: grid;
+    grid-template-columns: 2fr 1fr 1fr 1fr;
+    gap: 0.5rem;
+    padding: 0.75rem 0.5rem;
+}
+
+.stats-header {
+    font-weight: bold;
+    background-color: var(--color-surface-light);
+    border-radius: var(--border-radius) var(--border-radius) 0 0;
+}
+
+.stats-row {
+    border-bottom: 1px solid var(--color-border);
+}
+
+.stats-row:last-child {
+    border-bottom: none;
+}
+
+.stats-cell {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.loading-text {
+    text-align: center;
+    color: var(--color-text-secondary);
+    padding: 2rem 0;
+}
