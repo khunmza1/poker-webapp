@@ -20,12 +20,12 @@ export default defineConfig({
         start_url: '/',
         icons: [
           {
-            src: '192x192 poker.png',
+            src: 'public/192x192 poker.png',
             sizes: '192x192',
             type: 'image/png'
           },
           {
-            src: '512x512 poker.png',
+            src: 'public/512x512 poker.png',
             sizes: '512x512',
             type: 'image/png'
           }

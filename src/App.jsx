@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Plus, ArrowRight, X, Users, DollarSign, Calculator, Eraser, AlertTriangle, Settings, ChevronDown, ChevronUp, BookOpen, LogIn, PlusCircle, ArrowLeft, Bot, QrCode, Timer, Play, Pause, RefreshCw, SkipForward, SkipBack, Star, LogOut, Crown, User as UserIcon, Bell } from 'lucide-react';
 import { initializeApp } from "firebase/app";
-import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, onAuthStateChanged, signOut, updateProfile } from "firebase/auth";
+import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "firebase/auth";
 import { getFirestore, doc, setDoc, onSnapshot, getDoc, collection, query, where, getDocs, updateDoc } from "firebase/firestore";
 
 // --- Firebase Configuration ---
@@ -14,7 +14,7 @@ const firebaseConfig = {
   appId: import.meta.env.VITE_FIREBASE_APP_ID
 };
 
-// --- Helper Components (Now styled via CSS file) ---
+// --- Helper Components ---
 const Card = ({ children, className = '' }) => ( <div className={`card ${className}`}>{children}</div> );
 const Button = ({ children, onClick, variant = 'primary', className = '', disabled = false }) => ( <button onClick={onClick} disabled={disabled} className={`btn btn-${variant} ${className}`}>{children}</button> );
 const Modal = ({ isOpen, onClose, title, children }) => { if (!isOpen) return null; return ( <div className="modal-overlay"> <div className="modal-content"> <div className="modal-header"> <h2 className="modal-title">{title}</h2> <button onClick={onClose} className="modal-close-btn"><X size={24} /></button> </div> <div className="modal-body">{children}</div> </div> </div> ); };
