@@ -916,140 +916,88 @@ function MainApp({ currentUser, userProfile, setUserProfile, auth, db, isAdmin, 
     }, []);
     
     return (
-        <Card>
-            <h2 className="section-title">Player Leaderboard</h2>
-            <Button onClick={() => setView('game')} variant="secondary" className="back-btn">
-                <ArrowLeft className="icon"/> Back to Game
-            </Button>
-            
-            {isLoading ? (
-                <p className="loading-text">Loading stats...</p>
-            ) : statsData.length === 0 ? (
-                <p>No game data available yet.</p>
-            ) : (
-                <div className="stats-table">
-                    <div className="stats-header">
-                        <div className="stats-cell">Player</div>
-                        <div className="stats-cell">Games</div>
-                        <div className="stats-cell">Win/Loss</div>
-                        <div className="stats-cell">Total Profit</div>
-                    </div>
-                    {statsData.map(player => (
-                        <div key={player.name} className="stats-row">
-                            <div className="stats-cell">{player.name}</div>
-                            <div className="stats-cell">{player.totalGames}</div>
-                            <div className="stats-cell">{player.wins}/{player.losses}</div>
-                            <div className={`stats-cell ${player.totalProfit >= 0 ? 'text-green' : 'text-red'}`}>
-                                {player.totalProfit >= 0 ? '+' : ''}{formatMoney(player.totalProfit)}
-                            </div>
-                        </div>
-                    ))}
+    <div className="app-container">
+        <header>
+            <div className="header-main">
+                <h1>Poker Night Ledger</h1>
+                <p>Track chips, buy-ins, and payouts in real-time</p>
+            </div>
+            <div className="header-user-info">
+                <span>Logged in as <strong>{username}</strong> <span className="user-role">{userRole}</span></span>
+                <div className="header-actions">
+                    <Button onClick={() => openModal('profile')} variant="secondary" className="stats-btn"><UserIcon/></Button>
+                    {isAdmin && <Button onClick={() => setView('admin')} variant="secondary" className="stats-btn"><Crown/></Button>}
+                    <Button onClick={() => setView('stats')} variant="secondary" className="stats-btn"><BarChart2 className="icon"/></Button>
+                    <Button onClick={() => setView('blinds')} variant="secondary" className="stats-btn" disabled={!sessionActive}><Timer/></Button>
+                    <Button onClick={() => openModal('settings')} variant="secondary" className="settings-btn"><Settings/></Button>
+                    <Button onClick={() => signOut(auth)} variant="danger" className="logout-btn"><LogOut/></Button>
                 </div>
-            )}
-        </Card>
-    );
-};
-
-const renderFinalCountsAdmin = () => {
-    return (
-        <Card>
-            <h2 className="section-title"><Calculator className="icon"/> Final Chip Counts</h2>
-            <p className="text-sm">Enter or adjust the final chip counts for all players.</p>
-            <Button onClick={() => setView('game')} variant="secondary" className="back-btn">
-                <ArrowLeft className="icon"/> Back to Game
-            </Button>
-            
-            <div className="final-counts-list">
-                {players.map(player => {
-                    // Get the player's current final count from session data
-                    const finalCount = sessionData?.finalCounts?.[player.id] || 0;
-                    
-                    return (
-                        <div key={player.id} className="final-counts-item">
-                            <div className="player-name-group">
-                                <span>{player.name}</span>
-                                {player.status === 'joined' && <div className="status-dot joined" title="Joined"></div>}
-                                {player.status === 'guest' && <div className="status-dot guest" title="Guest"></div>}
-                            </div>
-                            <div className="input-group">
-                                <input 
-                                    type="number" 
-                                    value={finalCount} 
-                                    onChange={(e) => {
-                                        const count = parseInt(e.target.value) || 0;
-                                        // Update final count in Firestore
-                                        const sessionRef = doc(db, `artifacts/${appId}/public/data/poker-sessions`, sessionId);
-                                        updateDoc(sessionRef, {
-                                            [`finalCounts.${player.id}`]: count
-                                        });
-                                    }}
-                                />
-                            </div>
+            </div>
+        </header>
+        
+        <main>
+            {view === 'admin' ? (
+                renderAdminPanel()
+            ) : view === 'blinds' ? (
+                renderBlindsTimer()
+            ) : view === 'stats' ? (
+                <StatsView />
+            ) : view === 'final-counts-admin' ? (
+                renderFinalCountsAdmin()
+            ) : view === 'final-counts-player' ? (
+                renderFinalCountsPlayer()
+            ) : !sessionActive ? (
+                renderSessionManager()
+            ) : finalCalculations ? (
+                renderSummary()
+            ) : (
+                <>
+                    {isLoadingSession ? <p className="loading-text">Loading Session...</p> : 
+                    <>
+                        <div className="main-grid">
+                            {renderSessionManager()}
+                            {(isAdmin || isGameMaker) && renderAddPlayerForm()}
+                            {!hasJoined && renderJoinLobby()}
+                            {players.length > 0 ? renderPlayerList() : (
+                              !isAdmin && !isGameMaker && <Card><p className="text-center">Lobby is empty. Join the game or ask a Game Maker to add guests.</p></Card>
+                            )}
                         </div>
-                    );
-                })}
-            </div>
-            
-            <div className="game-summary-footer">
-                <Button 
-                    onClick={() => {
-                        // Use finalCounts from sessionData
-                        handleEndGameCalculation(sessionData?.finalCounts || {});
-                    }} 
-                    variant="primary"
-                >
-                    <Calculator className="icon"/> Calculate Results
-                </Button>
-            </div>
-        </Card>
-    );
-};
-
-const renderFinalCountsPlayer = () => {
-    // Find the current player in the players list
-    const currentPlayer = players.find(p => p.uid === currentUser.uid);
-    
-    if (!currentPlayer) {
-        return (
-            <Card>
-                <h2 className="section-title"><Calculator className="icon"/> Game Ending</h2>
-                <p>You are not a player in this game.</p>
-                <Button onClick={() => setView('game')} variant="secondary" className="back-btn">
-                    <ArrowLeft className="icon"/> Back to Game
-                </Button>
-            </Card>
-        );
-    }
-    
-    // Get the player's current final count
-    const finalCount = sessionData?.finalCounts?.[currentPlayer.id] || 0;
-    
-    return (
-        <Card>
-            <h2 className="section-title"><Calculator className="icon"/> Your Final Chip Count</h2>
-            <p className="text-sm">Please enter your final chip count accurately.</p>
-            <Button onClick={() => setView('game')} variant="secondary" className="back-btn">
-                <ArrowLeft className="icon"/> Back to Game
-            </Button>
-            
-            <div className="form-group">
-                <label>Your Final Chips</label>
-                <input 
-                    type="number"
-                    value={finalCount} 
-                    onChange={(e) => {
-                        const count = parseInt(e.target.value) || 0;
-                        // Update your own final count in Firestore
-                        const sessionRef = doc(db, `artifacts/${appId}/public/data/poker-sessions`, sessionId);
-                        updateDoc(sessionRef, {
-                            [`finalCounts.${currentPlayer.id}`]: count
-                        });
-                    }}
-                />
-            </div>
-            
-            <p className="text-sm">The game organizer will calculate final results after all players have submitted their counts.</p>
-        </Card>
-    );
-};
+                    </>
+                    }
+                </>
+            )}
+        </main>
+        
+        {showConsole && <ConsoleLog />}
+        
+        <Modal 
+            isOpen={modal.isOpen} 
+            onClose={closeModal} 
+            title={
+                modal.type === 'buy-in' ? 'Buy Chips' :
+                modal.type === 'self-buy-in' ? 'Join Game & Buy-in' :
+                modal.type === 'cash-out' ? 'Cash Out' :
+                modal.type === 'end-game' ? 'End Game' :
+                modal.type === 'error' ? 'Error' :
+                modal.type === 'settings' ? 'Settings' :
+                modal.type === 'profile' ? 'User Profile' :
+                modal.type === 'edit-player' ? 'Edit Player' :
+                modal.type === 'show-qr' ? 'PromptPay QR Code' :
+                modal.type === 'no-qr' ? 'No PromptPay ID' :
+                'Modal'
+            }
+        >
+            {modal.type === 'buy-in' && <BuyInModalContent />}
+            {modal.type === 'self-buy-in' && <SelfBuyInModalContent />}
+            {modal.type === 'cash-out' && <CashOutModalContent />}
+            {modal.type === 'end-game' && <EndGameModalContent />}
+            {modal.type === 'error' && <ErrorModalContent />}
+            {modal.type === 'settings' && <SettingsModalContent />}
+            {modal.type === 'profile' && <ProfileModalContent currentUser={currentUser} userProfile={userProfile} setUserProfile={setUserProfile} db={db} appId={appId} closeModal={closeModal} />}
+            {modal.type === 'edit-player' && <EditPlayerModalContent />}
+            {modal.type === 'show-qr' && <QrCodeModalContent />}
+            {modal.type === 'no-qr' && <NoQrCodeModalContent />}
+        </Modal>
+    </div>
+);
 }
