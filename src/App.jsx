@@ -859,75 +859,195 @@ function MainApp({ currentUser, userProfile, setUserProfile, auth, db, isAdmin, 
       const NoQrCodeModalContent = () => { const { from, to, amount } = modal.data; return (<div className="text-center form-group-stack"> <AlertTriangle className="icon-lg text-yellow"/> <h3>No PromptPay ID for <strong>{to}</strong></h3> <p>Please have <strong>{from}</strong> transfer <strong>{formatMoney(amount)}</strong> manually.</p> <Button onClick={closeModal} variant="primary">OK</Button> </div>); };
       const ConsoleLog = () => ( <div className={`console-log ${showConsole ? 'show' : ''}`}> <div> <div className="console-header"> <h3>Transaction Log</h3> <button onClick={() => setShowConsole(false)}><X size={24}/></button> </div> <ul className="console-body"> {transactionLog.map(log => ( <li key={log.id}> <span>{new Date(log.timestamp).toLocaleTimeString()}:</span> {log.ip && <span className="log-ip">[{log.ip}]</span>} <span className="log-type">{log.type}</span> {log.player && <span>Player: {log.player}</span>} {log.amount && <span>Amount: {log.amount}</span>} {log.source && <span>Source: {log.source}</span>} {log.message && <span>{log.message}</span>} </li> ))} </ul> </div> </div> );
 
+    const renderStatsView = () => {
+        const [statsData, setStatsData] = useState([]);
+        const [isLoading, setIsLoading] = useState(true);
+        
+        useEffect(() => {
+            const fetchStats = async () => {
+                setIsLoading(true);
+                try {
+                    // Fetch all completed sessions
+                    const sessionsRef = collection(db, `artifacts/${appId}/public/data/poker-sessions`);
+                    const q = query(sessionsRef, where('gameState', '==', 'finished'));
+                    const querySnapshot = await getDocs(q);
+                    
+                    // Collect player stats
+                    const playerStats = {};
+                    querySnapshot.forEach(doc => {
+                        const session = doc.data();
+                        if (session.finalCalculations?.players) {
+                            session.finalCalculations.players.forEach(player => {
+                                if (!playerStats[player.name]) {
+                                    playerStats[player.name] = {
+                                        name: player.name,
+                                        totalGames: 0,
+                                        totalProfit: 0,
+                                        wins: 0,
+                                        losses: 0
+                                    };
+                            }
+                            
+                            playerStats[player.name].totalGames++;
+                            playerStats[player.name].totalProfit += player.balance;
+                            
+                            if (player.balance > 0) {
+                                playerStats[player.name].wins++;
+                            } else if (player.balance < 0) {
+                                playerStats[player.name].losses++;
+                            }
+                        });
+                    }
+                });
+                
+                // Convert to array and sort by profit
+                const statsArray = Object.values(playerStats).sort((a, b) => b.totalProfit - a.totalProfit);
+                setStatsData(statsArray);
+            } catch (error) {
+                console.error("Error fetching stats:", error);
+            } finally {
+                setIsLoading(false);
+            }
+        };
+        
+        fetchStats();
+    }, []);
+    
     return (
-        <div className="app-container">
-          <header>
-            <div className="header-main">
-                <h1>Poker Night Ledger</h1>
-                <p>Effortlessly track buy-ins and settle up.</p>
-            </div>
-                           <div className="header-user-info">
-                <span>Logged in as: <strong>{username}</strong> <span className="user-role"> {userRole} </span></span>
-                <div className="header-actions">
-                  <Button onClick={() => openModal('profile')} variant="secondary" className="stats-btn"><UserIcon/></Button>
-                  {isAdmin && <Button onClick={() => setView('admin')} variant="secondary" className="stats-btn"><Crown/></Button>}
-                  <Button onClick={() => setView('stats')} variant="secondary" className="stats-btn"><BarChart2 className="icon"/></Button>
-                  <Button onClick={() => setView('blinds')} variant="secondary" className="stats-btn" disabled={!sessionActive}><Timer/></Button>
-                  <Button onClick={() => openModal('settings')} variant="secondary" className="settings-btn"><Settings/></Button>
-                  <Button onClick={() => signOut(auth)} variant="danger" className="logout-btn"><LogOut/></Button>
+        <Card>
+            <h2 className="section-title">Player Leaderboard</h2>
+            <Button onClick={() => setView('game')} variant="secondary" className="back-btn">
+                <ArrowLeft className="icon"/> Back to Game
+            </Button>
+            
+            {isLoading ? (
+                <p className="loading-text">Loading stats...</p>
+            ) : statsData.length === 0 ? (
+                <p>No game data available yet.</p>
+            ) : (
+                <div className="stats-table">
+                    <div className="stats-header">
+                        <div className="stats-cell">Player</div>
+                        <div className="stats-cell">Games</div>
+                        <div className="stats-cell">Win/Loss</div>
+                        <div className="stats-cell">Total Profit</div>
+                    </div>
+                    {statsData.map(player => (
+                        <div key={player.name} className="stats-row">
+                            <div className="stats-cell">{player.name}</div>
+                            <div className="stats-cell">{player.totalGames}</div>
+                            <div className="stats-cell">{player.wins}/{player.losses}</div>
+                            <div className={`stats-cell ${player.totalProfit >= 0 ? 'text-green' : 'text-red'}`}>
+                                {player.totalProfit >= 0 ? '+' : ''}{formatMoney(player.totalProfit)}
+                            </div>
+                        </div>
+                    ))}
                 </div>
-            </div>
-          </header>
-          <main>
-              {view === 'admin' ? (
-                  renderAdminPanel()
-              ) : view === 'blinds' ? (
-                  renderBlindsTimer()
-              ) : view === 'stats' ? (
-                  renderStatsView()
-              ) : view === 'final-counts-admin' ? (
-                renderFinalCountsAdmin()
-              ) : view === 'final-counts-player' ? (
-                renderFinalCountsPlayer()
-              ) : !sessionActive ? (
-                  renderSessionManager()
-              ) : finalCalculations ? (
-                  renderSummary()
-              ) : (
-                  <>
-                      {isLoadingSession ? <p className="loading-text">Loading Session...</p> : 
-                      <>
-                          <div className="main-grid">
-                              {renderSessionManager()}
-                              {(isAdmin || isGameMaker) && renderAddPlayerForm()}
-                              {!hasJoined && renderJoinLobby()}
-                              {players.length > 0 ? renderPlayerList() : (
-                                !isAdmin && !isGameMaker && <Card><p className="text-center">Lobby is empty. Join the game or ask a Game Maker to add guests.</p></Card>
-                              )}
-                          </div>
-                      </>
-                      }
-                  </>
-              )}
-          </main>
-          <footer>
-              <p>&copy; 2024 - Built for poker nights with friends.</p>
-              <button onClick={() => setShowConsole(true)} disabled={!sessionActive}> <BookOpen className="icon-sm"/> Show Log </button>
-          </footer>
-          <Modal isOpen={modal.isOpen} onClose={closeModal} title={ modal.type === 'buy-in' ? 'Buy Chips' : modal.type === 'cash-out' ? 'Cash Out' : modal.type === 'end-game' ? 'End Game' : modal.type === 'error' ? <><AlertTriangle className="icon"/> Balance Error</> : modal.type === 'settings' ? <><Settings className="icon"/> Global Settings</> : modal.type === 'edit-player' ? <><QrCode className="icon"/> Edit PromptPay ID</> : modal.type === 'show-qr' ? 'PromptPay Payment' : modal.type === 'no-qr' ? 'Manual Transfer Required' : modal.type === 'self-buy-in' ? 'Join & Buy-in' : modal.type === 'profile' ? 'Edit Profile' : '' }>
-            {modal.type === 'buy-in' && <BuyInModalContent />}
-            {modal.type === 'cash-out' && <CashOutModalContent />}
-            {modal.type === 'end-game' && <EndGameModalContent />}
-            {modal.type === 'error' && <ErrorModalContent />}
-            {modal.type === 'settings' && <SettingsModalContent />}
-            {modal.type === 'edit-player' && <EditPlayerModalContent />}
-            {modal.type === 'show-qr' && <QrCodeModalContent />}
-            {modal.type === 'no-qr' && <NoQrCodeModalContent />}
-            {modal.type === 'self-buy-in' && <SelfBuyInModalContent />}
-            {modal.type === 'profile' && <ProfileModalContent currentUser={currentUser} userProfile={userProfile} setUserProfile={setUserProfile} db={db} appId={appId} closeModal={closeModal} />}
-        </Modal>
-        <ConsoleLog />
-      </div>
+            )}
+        </Card>
     );
-  }
-  
+};
+
+const renderFinalCountsAdmin = () => {
+    return (
+        <Card>
+            <h2 className="section-title"><Calculator className="icon"/> Final Chip Counts</h2>
+            <p className="text-sm">Enter or adjust the final chip counts for all players.</p>
+            <Button onClick={() => setView('game')} variant="secondary" className="back-btn">
+                <ArrowLeft className="icon"/> Back to Game
+            </Button>
+            
+            <div className="final-counts-list">
+                {players.map(player => {
+                    // Get the player's current final count from session data
+                    const finalCount = sessionData?.finalCounts?.[player.id] || 0;
+                    
+                    return (
+                        <div key={player.id} className="final-counts-item">
+                            <div className="player-name-group">
+                                <span>{player.name}</span>
+                                {player.status === 'joined' && <div className="status-dot joined" title="Joined"></div>}
+                                {player.status === 'guest' && <div className="status-dot guest" title="Guest"></div>}
+                            </div>
+                            <div className="input-group">
+                                <input 
+                                    type="number" 
+                                    value={finalCount} 
+                                    onChange={(e) => {
+                                        const count = parseInt(e.target.value) || 0;
+                                        // Update final count in Firestore
+                                        const sessionRef = doc(db, `artifacts/${appId}/public/data/poker-sessions`, sessionId);
+                                        updateDoc(sessionRef, {
+                                            [`finalCounts.${player.id}`]: count
+                                        });
+                                    }}
+                                />
+                            </div>
+                        </div>
+                    );
+                })}
+            </div>
+            
+            <div className="game-summary-footer">
+                <Button 
+                    onClick={() => {
+                        // Use finalCounts from sessionData
+                        handleEndGameCalculation(sessionData?.finalCounts || {});
+                    }} 
+                    variant="primary"
+                >
+                    <Calculator className="icon"/> Calculate Results
+                </Button>
+            </div>
+        </Card>
+    );
+};
+
+const renderFinalCountsPlayer = () => {
+    // Find the current player in the players list
+    const currentPlayer = players.find(p => p.uid === currentUser.uid);
+    
+    if (!currentPlayer) {
+        return (
+            <Card>
+                <h2 className="section-title"><Calculator className="icon"/> Game Ending</h2>
+                <p>You are not a player in this game.</p>
+                <Button onClick={() => setView('game')} variant="secondary" className="back-btn">
+                    <ArrowLeft className="icon"/> Back to Game
+                </Button>
+            </Card>
+        );
+    }
+    
+    // Get the player's current final count
+    const finalCount = sessionData?.finalCounts?.[currentPlayer.id] || 0;
+    
+    return (
+        <Card>
+            <h2 className="section-title"><Calculator className="icon"/> Your Final Chip Count</h2>
+            <p className="text-sm">Please enter your final chip count accurately.</p>
+            <Button onClick={() => setView('game')} variant="secondary" className="back-btn">
+                <ArrowLeft className="icon"/> Back to Game
+            </Button>
+            
+            <div className="form-group">
+                <label>Your Final Chips</label>
+                <input 
+                    type="number"
+                    value={finalCount} 
+                    onChange={(e) => {
+                        const count = parseInt(e.target.value) || 0;
+                        // Update your own final count in Firestore
+                        const sessionRef = doc(db, `artifacts/${appId}/public/data/poker-sessions`, sessionId);
+                        updateDoc(sessionRef, {
+                            [`finalCounts.${currentPlayer.id}`]: count
+                        });
+                    }}
+                />
+            </div>
+            
+            <p className="text-sm">The game organizer will calculate final results after all players have submitted their counts.</p>
+        </Card>
+    );
+};
+}

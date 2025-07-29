@@ -433,8 +433,6 @@ footer button:hover { color: var(--color-brand-hover); }
     text-overflow: ellipsis;
 }
 
-.loading-text {
-    text-align: center;
-    color: var(--color-text-secondary);
-    padding: 2rem 0;
+.back-btn {
+    margin-bottom: 1rem;
 }
