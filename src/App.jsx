@@ -184,27 +184,34 @@ export default function App() {
 }
 
 // ADDED: Notification setup
+// ADDED: Notification setup with error handling
 useEffect(() => {
-  if ('serviceWorker' in navigator && 'PushManager' in window) {
-    // Register service worker
+  if ('serviceWorker' in navigator && 'PushManager' in window && import.meta.env.VITE_VAPID_PUBLIC_KEY) {
     navigator.serviceWorker.register('/service-worker.js').then(registration => {
       console.log('Service Worker registered with scope:', registration.scope);
-      // Request notification permission
       Notification.requestPermission().then(permission => {
         if (permission === 'granted') {
           console.log('Notification permission granted.');
-          // Subscribe to push notifications
           registration.pushManager.subscribe({
             userVisibleOnly: true,
             applicationServerKey: urlBase64ToUint8Array(import.meta.env.VITE_VAPID_PUBLIC_KEY)
           }).then(subscription => {
-            // Save subscription to Firestore
             const subscriptionRef = doc(db, `artifacts/${appId}/public/data/users/${currentUser.uid}/subscriptions`, getDeviceId());
-            setDoc(subscriptionRef, { subscription: JSON.parse(JSON.stringify(subscription)) });
+            setDoc(subscriptionRef, { subscription: JSON.parse(JSON.stringify(subscription)) }).catch(err => {
+              console.error('Failed to save push subscription:', err);
+            });
+          }).catch(err => {
+            console.error('Push subscription failed:', err);
           });
         }
+      }).catch(err => {
+        console.error('Notification permission request failed:', err);
       });
-    }).catch(err => console.error('Service Worker registration failed:', err));
+    }).catch(err => {
+      console.error('Service Worker registration failed:', err);
+    });
+  } else {
+    console.log('Push notifications not supported or VAPID key missing.');
   }
 }, [db, appId, currentUser.uid]);
 
@@ -223,6 +230,27 @@ const urlBase64ToUint8Array = (base64String) => {
 const [currentBlindIndex, setCurrentBlindIndex] = useState(0);
 const [isRunning, setIsRunning] = useState(false);
 const [timeLeft, setTimeLeft] = useState(480);
+
+class ErrorBoundary extends React.Component {
+  state = { hasError: false, error: null };
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <Card>
+          <h2 className="text-red">Something went wrong!</h2>
+          <p>{this.state.error?.message || 'An unexpected error occurred.'}</p>
+          <Button onClick={() => window.location.reload()}>Reload App</Button>
+        </Card>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 // --- Main Application Logic (after login) ---
 function MainApp({ currentUser, userProfile, setUserProfile, auth, db, isAdmin, isGameMaker, appId }) {
@@ -393,15 +421,30 @@ const listenToSession = (sid) => {
       setTransactionLog(data.transactionLog || []);
       setChipValue(data.chipValue || 0.5);
       setFinalCalculations(data.finalCalculations || null);
+      // CHANGE: Sync timer state with defaults if undefined
+      setCurrentBlindIndex(data.currentBlindIndex ?? 0);
+      setIsRunning(data.timerRunning ?? false);
+      setTimeLeft(data.timerDuration ?? 480);
       // CHANGE: Open end-game modal when gameState is 'awaiting_counts'
       if (data.gameState === 'awaiting_counts' && !modal.isOpen) {
         openModal('end-game');
       }
-      // ADDED: Sync timer state
-      setCurrentBlindIndex(data.currentBlindIndex || 0);
-      setIsRunning(data.timerRunning || false);
-      setTimeLeft(data.timerDuration || 480);
+    } else {
+      console.error('Session document does not exist:', sid);
+      setSessionId('');
+      setSessionActive(false);
+      setPlayers([]);
+      setTransactionLog([]);
+      setFinalCalculations(null);
+      setCurrentBlindIndex(0);
+      setIsRunning(false);
+      setTimeLeft(480);
     }
+  }, (error) => {
+    console.error('Error listening to session:', error);
+    // ADDED: Fallback to ensure app doesn't break
+    setSessionActive(false);
+    setIsLoadingSession(false);
   });
 };
 
@@ -886,86 +929,95 @@ const renderPlayerList = () => (
   const ConsoleLog = () => ( <div className={`console-log ${showConsole ? 'show' : ''}`}> <div> <div className="console-header"> <h3>Transaction Log</h3> <button onClick={() => setShowConsole(false)}><X size={24}/></button> </div> <ul className="console-body"> {transactionLog.map(log => ( <li key={log.id}> <span>{new Date(log.timestamp).toLocaleTimeString()}:</span> {log.ip && <span className="log-ip">[{log.ip}]</span>} <span className="log-type">{log.type}</span> {log.player && <span>Player: {log.player}</span>} {log.amount && <span>Amount: {log.amount}</span>} {log.source && <span>Source: {log.source}</span>} {log.message && <span>{log.message}</span>} </li> ))} </ul> </div> </div> );
 
   return (
+  <ErrorBoundary>
     <div className="app-container">
       <header>
         <div className="header-main">
-            <h1>Poker Night Ledger</h1>
-            <p>Effortlessly track buy-ins and settle up.</p>
+          <h1>Poker Night Ledger</h1>
+          <p>Effortlessly track buy-ins and settle up.</p>
         </div>
         <div className="header-user-info">
-            <span>Logged in as: <strong>{username}</strong> <span className="user-role">{userRole}</span></span>
-            <div className="header-actions">
-              <Button onClick={() => openModal('profile')} variant="secondary" className="stats-btn"><UserIcon/></Button>
-              {isAdmin && <Button onClick={() => setView('admin')} variant="secondary" className="stats-btn"><Crown/></Button>}
-              <Button onClick={() => setView('blinds')} variant="secondary" className="stats-btn" disabled={!sessionActive}><Timer/></Button>
-              <Button onClick={() => openModal('settings')} variant="secondary" className="settings-btn"><Settings/></Button>
-              <Button onClick={() => signOut(auth)} variant="danger" className="logout-btn"><LogOut/></Button>
-            </div>
+          <span>Logged in as: <strong>{username}</strong> <span className="user-role">{userRole}</span></span>
+          <div className="header-actions">
+            <Button onClick={() => openModal('profile')} variant="secondary" className="stats-btn"><UserIcon/></Button>
+            {isAdmin && <Button onClick={() => setView('admin')} variant="secondary" className="stats-btn"><Crown/></Button>}
+            <Button onClick={() => setView('blinds')} variant="secondary" className="stats-btn" disabled={!sessionActive}><Timer/></Button>
+            <Button onClick={() => openModal('settings')} variant="secondary" className="settings-btn"><Settings/></Button>
+            <Button onClick={() => signOut(auth)} variant="danger" className="logout-btn"><LogOut/></Button>
+          </div>
         </div>
       </header>
       <main>
-  {view === 'blinds' && sessionActive ? (
-    <BlindsTimer
-      sessionData={sessionData}
-      sessionId={sessionId}
-      db={db}
-      appId={appId}
-      isAdmin={isAdmin}
-      isGameMaker={isGameMaker}
-    />
-  ) : !sessionActive ? (
-    renderSessionManager()
-  ) : finalCalculations ? (
-    renderSummary()
-  ) : (
-    <>
-      {isLoadingSession ? <p className="loading-text">Loading Session...</p> : 
-        <>
+        {console.log({ view, sessionActive, isLoadingSession, finalCalculations, players })}
+        {view === 'blinds' && sessionActive ? (
+          <BlindsTimer
+            sessionData={sessionData}
+            sessionId={sessionId}
+            db={db}
+            appId={appId}
+            isAdmin={isAdmin}
+            isGameMaker={isGameMaker}
+          />
+        ) : !sessionActive ? (
+          renderSessionManager()
+        ) : finalCalculations ? (
+          renderSummary()
+        ) : isLoadingSession ? (
+          <p className="loading-text">Loading Session...</p>
+        ) : (
           <div className="main-grid">
             {renderSessionManager()}
             {(isAdmin || isGameMaker) && renderAddPlayerForm()}
             {!hasJoined && renderJoinLobby()}
-            {players.length > 0 ? renderPlayerList() : (
-              !isAdmin && !isGameMaker && <Card><p className="text-center">Lobby is empty. Join the game or ask a Game Maker to add guests.</p></Card>
+            {players.length > 0 ? (
+              renderPlayerList()
+            ) : (
+              <Card>
+                <p className="text-center">
+                  {(isAdmin || isGameMaker)
+                    ? 'Lobby is empty. Add guests to start the game.'
+                    : 'Lobby is empty. Join the game or ask a Game Maker to add guests.'}
+                </p>
+              </Card>
             )}
           </div>
-        </>
-      }
-    </>
-  )}
-</main>
+        )}
+      </main>
       <footer>
-          <p>&copy; 2024 - Built for poker nights with friends.</p>
-          <button onClick={() => setShowConsole(true)} disabled={!sessionActive}> <BookOpen className="icon-sm"/> Show Log </button>
+        <p>&copy; 2024 - Built for poker nights with friends.</p>
+        <button onClick={() => setShowConsole(true)} disabled={!sessionActive}>
+          <BookOpen className="icon-sm"/> Show Log
+        </button>
       </footer>
       <Modal isOpen={modal.isOpen} onClose={closeModal} title={
-  modal.type === 'buy-in' ? 'Buy Chips' :
-  modal.type === 'cash-out' ? 'Cash Out' :
-  modal.type === 'end-game' ? 'End Game' :
-  modal.type === 'error' ? <><AlertTriangle className="icon"/> Balance Error</> :
-  modal.type === 'settings' ? <><Settings className="icon"/> Global Settings</> :
-  modal.type === 'edit-player' ? <><QrCode className="icon"/> Edit PromptPay ID</> :
-  modal.type === 'show-qr' ? 'PromptPay Payment' :
-  modal.type === 'no-qr' ? 'Manual Transfer Required' :
-  modal.type === 'self-buy-in' ? 'Join & Buy-in' :
-  modal.type === 'self-request-buy-in' ? 'Request Buy-in' : // ADDED: New modal type
-  modal.type === 'profile' ? 'Edit Profile' : ''
-}>
-  {modal.type === 'buy-in' && <BuyInModalContent />}
-  {modal.type === 'cash-out' && <CashOutModalContent />}
-  {modal.type === 'end-game' && <EndGameModalContent />}
-  {modal.type === 'error' && <ErrorModalContent />}
-  {modal.type === 'settings' && <SettingsModalContent />}
-  {modal.type === 'edit-player' && <EditPlayerModalContent />}
-  {modal.type === 'show-qr' && <QrCodeModalContent />}
-  {modal.type === 'no-qr' && <NoQrCodeModalContent />}
-  {modal.type === 'self-buy-in' && <SelfBuyInModalContent />}
-  {modal.type === 'self-request-buy-in' && <SelfRequestBuyInModalContent />} {/* ADDED: New modal content */}
-  {modal.type === 'profile' && <ProfileModalContent currentUser={currentUser} userProfile={userProfile} setUserProfile={setUserProfile} db={db} appId={appId} closeModal={closeModal} />}
-</Modal>
+        modal.type === 'buy-in' ? 'Buy Chips' :
+        modal.type === 'cash-out' ? 'Cash Out' :
+        modal.type === 'end-game' ? 'End Game' :
+        modal.type === 'error' ? <><AlertTriangle className="icon"/> Balance Error</> :
+        modal.type === 'settings' ? <><Settings className="icon"/> Global Settings</> :
+        modal.type === 'edit-player' ? <><QrCode className="icon"/> Edit PromptPay ID</> :
+        modal.type === 'show-qr' ? 'PromptPay Payment' :
+        modal.type === 'no-qr' ? 'Manual Transfer Required' :
+        modal.type === 'self-buy-in' ? 'Join & Buy-in' :
+        modal.type === 'self-request-buy-in' ? 'Request Buy-in' :
+        modal.type === 'profile' ? 'Edit Profile' : ''
+      }>
+        {modal.type === 'buy-in' && <BuyInModalContent />}
+        {modal.type === 'cash-out' && <CashOutModalContent />}
+        {modal.type === 'end-game' && <EndGameModalContent />}
+        {modal.type === 'error' && <ErrorModalContent />}
+        {modal.type === 'settings' && <SettingsModalContent />}
+        {modal.type === 'edit-player' && <EditPlayerModalContent />}
+        {modal.type === 'show-qr' && <QrCodeModalContent />}
+        {modal.type === 'no-qr' && <NoQrCodeModalContent />}
+        {modal.type === 'self-buy-in' && <SelfBuyInModalContent />}
+        {modal.type === 'self-request-buy-in' && <SelfRequestBuyInModalContent />}
+        {modal.type === 'profile' && <ProfileModalContent currentUser={currentUser} userProfile={userProfile} setUserProfile={setUserProfile} db={db} appId={appId} closeModal={closeModal} />}
+      </Modal>
       <ConsoleLog />
     </div>
-  );
+  </ErrorBoundary>
+);
 }
 
 // --- Profile Modal Content ---
@@ -996,9 +1048,9 @@ function ProfileModalContent({ currentUser, userProfile, setUserProfile, db, app
 }
 
 function BlindsTimer({ sessionData, sessionId, db, appId, isAdmin, isGameMaker }) {
-  const [currentBlindIndex, setCurrentBlindIndex] = useState(0);
-  const [timeLeft, setTimeLeft] = useState(sessionData?.timerDuration || 480);
-  const [isRunning, setIsRunning] = useState(false);
+  const [currentBlindIndex, setCurrentBlindIndex] = useState(sessionData?.currentBlindIndex ?? 0);
+  const [timeLeft, setTimeLeft] = useState(sessionData?.timerDuration ?? 480);
+  const [isRunning, setIsRunning] = useState(sessionData?.timerRunning ?? false);
   const blinds = sessionData?.blinds || [
     { sb: 5, bb: 10 }, { sb: 10, bb: 20 }, { sb: 15, bb: 30 },
     { sb: 20, bb: 40 }, { sb: 25, bb: 50 }, { sb: 30, bb: 60 }
@@ -1010,26 +1062,36 @@ function BlindsTimer({ sessionData, sessionId, db, appId, isAdmin, isGameMaker }
       timer = setInterval(() => {
         setTimeLeft(prev => {
           if (prev <= 1) {
-            setCurrentBlindIndex(prevIndex => Math.min(prevIndex + 1, blinds.length - 1));
-            return sessionData?.timerDuration || 480;
+            setCurrentBlindIndex(prevIndex => {
+              const newIndex = Math.min(prevIndex + 1, blinds.length - 1);
+              if (db && (isAdmin || isGameMaker)) {
+                const sessionRef = doc(db, `artifacts/${appId}/public/data/poker-sessions`, sessionId);
+                updateDoc(sessionRef, { currentBlindIndex: newIndex });
+              }
+              return newIndex;
+            });
+            return sessionData?.timerDuration ?? 480;
           }
           return prev - 1;
         });
       }, 1000);
     }
     return () => clearInterval(timer);
-  }, [isRunning, timeLeft, sessionData?.timerDuration, blinds.length]);
+  }, [isRunning, timeLeft, sessionData?.timerDuration, blinds.length, db, appId, sessionId, isAdmin, isGameMaker]);
 
   const handleStartPause = () => {
-    setIsRunning(prev => !prev);
-    if (!isRunning && db && (isAdmin || isGameMaker)) {
-      const sessionRef = doc(db, `artifacts/${appId}/public/data/poker-sessions`, sessionId);
-      updateDoc(sessionRef, { currentBlindIndex, timerRunning: !isRunning });
-    }
+    setIsRunning(prev => {
+      const newState = !prev;
+      if (db && (isAdmin || isGameMaker)) {
+        const sessionRef = doc(db, `artifacts/${appId}/public/data/poker-sessions`, sessionId);
+        updateDoc(sessionRef, { timerRunning: newState });
+      }
+      return newState;
+    });
   };
 
   const handleReset = () => {
-    setTimeLeft(sessionData?.timerDuration || 480);
+    setTimeLeft(sessionData?.timerDuration ?? 480);
     setCurrentBlindIndex(0);
     setIsRunning(false);
     if (db && (isAdmin || isGameMaker)) {
@@ -1039,21 +1101,27 @@ function BlindsTimer({ sessionData, sessionId, db, appId, isAdmin, isGameMaker }
   };
 
   const handleSkipForward = () => {
-    setCurrentBlindIndex(prev => Math.min(prev + 1, blinds.length - 1));
-    setTimeLeft(sessionData?.timerDuration || 480);
-    if (db && (isAdmin || isGameMaker)) {
-      const sessionRef = doc(db, `artifacts/${appId}/public/data/poker-sessions`, sessionId);
-      updateDoc(sessionRef, { currentBlindIndex: Math.min(currentBlindIndex + 1, blinds.length - 1) });
-    }
+    setCurrentBlindIndex(prev => {
+      const newIndex = Math.min(prev + 1, blinds.length - 1);
+      if (db && (isAdmin || isGameMaker)) {
+        const sessionRef = doc(db, `artifacts/${appId}/public/data/poker-sessions`, sessionId);
+        updateDoc(sessionRef, { currentBlindIndex: newIndex });
+      }
+      return newIndex;
+    });
+    setTimeLeft(sessionData?.timerDuration ?? 480);
   };
 
   const handleSkipBack = () => {
-    setCurrentBlindIndex(prev => Math.max(prev - 1, 0));
-    setTimeLeft(sessionData?.timerDuration || 480);
-    if (db && (isAdmin || isGameMaker)) {
-      const sessionRef = doc(db, `artifacts/${appId}/public/data/poker-sessions`, sessionId);
-      updateDoc(sessionRef, { currentBlindIndex: Math.max(currentBlindIndex - 1, 0) });
-    }
+    setCurrentBlindIndex(prev => {
+      const newIndex = Math.max(prev - 1, 0);
+      if (db && (isAdmin || isGameMaker)) {
+        const sessionRef = doc(db, `artifacts/${appId}/public/data/poker-sessions`, sessionId);
+        updateDoc(sessionRef, { currentBlindIndex: newIndex });
+      }
+      return newIndex;
+    });
+    setTimeLeft(sessionData?.timerDuration ?? 480);
   };
 
   const formatTime = (seconds) => {
@@ -1066,7 +1134,7 @@ function BlindsTimer({ sessionData, sessionId, db, appId, isAdmin, isGameMaker }
     <Card>
       <h2 className="section-title">Blinds Timer</h2>
       <div className="blinds-timer">
-        <h3>Current Blinds: {blinds[currentBlindIndex].sb}/{blinds[currentBlindIndex].bb}</h3>
+        <h3>Current Blinds: {blinds[currentBlindIndex]?.sb ?? 5}/{blinds[currentBlindIndex]?.bb ?? 10}</h3>
         <p>Time Left: {formatTime(timeLeft)}</p>
         {(isAdmin || isGameMaker) && (
           <div className="timer-controls">

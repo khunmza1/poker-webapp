@@ -451,3 +451,31 @@ footer button:hover { color: var(--color-brand-hover); }
   font-weight: bold;
   color: #2ecc71;
 }
+
+.app-container {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  background-color: #f0f2f5; /* Ensure background is visible */
+}
+
+main {
+  flex: 1;
+  padding: 1rem;
+}
+
+.main-grid {
+  display: grid;
+  gap: 1rem;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+/* Ensure cards are visible */
+.card {
+  background: white;
+  border-radius: 8px;
+  padding: 1rem;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  display: block; /* Ensure cards are not hidden */
+}
