@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { Plus, ArrowRight, X, Users, DollarSign, Calculator, Eraser, AlertTriangle, Settings, ChevronDown, ChevronUp, BookOpen, LogIn, PlusCircle, ArrowLeft, Bot, QrCode, Timer, Play, Pause, RefreshCw, SkipForward, SkipBack, Star, LogOut, Crown, User as UserIcon, Bell } from 'lucide-react';
+import { Plus, ArrowRight, X, Users, DollarSign, Calculator, Eraser, AlertTriangle, Settings, ChevronDown, ChevronUp, BookOpen, LogIn, PlusCircle, ArrowLeft, Bot, QrCode, Timer, Play, Pause, RefreshCw, SkipForward, SkipBack, Star, LogOut, Crown, User as UserIcon, Bell, BarChart2 } from 'lucide-react';
 import { initializeApp } from "firebase/app";
-import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "firebase/auth";
+import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, onAuthStateChanged, signOut, getMessaging, getToken } from "firebase/auth";
 import { getFirestore, doc, setDoc, onSnapshot, getDoc, collection, query, where, getDocs, updateDoc } from "firebase/firestore";
 
 // --- Firebase Configuration ---
@@ -77,6 +77,8 @@ function AuthModal({ isOpen, onClose, auth, initialMode }) {
     return (
         <Modal isOpen={isOpen} onClose={onClose} title={isRegistering ? 'Register' : 'Login'}>
             <form onSubmit={handleSubmit} className="form-group-stack">
+                {error && <p className="text-red">{error}</p>}
+                <Button type="submit" variant="primary">{isRegistering ? 'Create Account' : 'Log In'}</Button>
                 <div className="form-group">
                     <label htmlFor="username">Username</label>
                     <input type="text" id="username" value={username} onChange={e => setUsername(e.target.value)} required />
@@ -85,8 +87,6 @@ function AuthModal({ isOpen, onClose, auth, initialMode }) {
                     <label htmlFor="password">Password</label>
                     <input type="password" id="password" value={password} onChange={e => setPassword(e.target.value)} required />
                 </div>
-                {error && <p className="text-red">{error}</p>}
-                <Button type="submit" variant="primary">{isRegistering ? 'Create Account' : 'Log In'}</Button>
             </form>
             <button onClick={() => setIsRegistering(!isRegistering)} className="toggle-auth-btn">
                 {isRegistering ? 'Already have an account? Log In' : 'Need an account? Register'}
@@ -197,7 +197,7 @@ function MainApp({ currentUser, userProfile, setUserProfile, auth, db, isAdmin, 
   const [showConsole, setShowConsole] = useState(false);
   const [userIp, setUserIp] = useState('unknown');
   const [view, setView] = useState('game'); // 'game', 'blinds', 'admin', 'stats', 'profile'
-  const [quickAddPlayers, setQuickAddPlayers] = useState([]);
+  const [quickAddPlayers, setQuickAddPlayers] = useState(['test1', 'test2']);
   
   // Session State
   const [sessionId, setSessionId] = useState('');
@@ -720,8 +720,8 @@ function MainApp({ currentUser, userProfile, setUserProfile, auth, db, isAdmin, 
             <h1>Poker Night Ledger</h1>
             <p>Effortlessly track buy-ins and settle up.</p>
         </div>
-        <div className="header-user-info">
-            <span>Logged in as: <strong>{username}</strong> <span className="user-role">{userRole}</span></span>
+                       <div className="header-user-info">
+            <span>Logged in as: <strong>{username}</strong> <span className="user-role"> {userRole} </span></span>
             <div className="header-actions">
               <Button onClick={() => openModal('profile')} variant="secondary" className="stats-btn"><UserIcon/></Button>
               {isAdmin && <Button onClick={() => setView('admin')} variant="secondary" className="stats-btn"><Crown/></Button>}
@@ -730,6 +730,7 @@ function MainApp({ currentUser, userProfile, setUserProfile, auth, db, isAdmin, 
               <Button onClick={() => signOut(auth)} variant="danger" className="logout-btn"><LogOut/></Button>
             </div>
         </div>
+
       </header>
       <main>
           {!sessionActive ? ( renderSessionManager() ) : finalCalculations ? ( renderSummary() ) : (
@@ -769,6 +770,7 @@ function MainApp({ currentUser, userProfile, setUserProfile, auth, db, isAdmin, 
     </div>
   );
 }
+
 
 // --- Profile Modal Content ---
 function ProfileModalContent({ currentUser, userProfile, setUserProfile, db, appId, closeModal }) {
