@@ -1001,4 +1001,228 @@ function MainApp({ currentUser, userProfile, setUserProfile, auth, db, isAdmin, 
     </div>
 );
 }
-}
+
+const ProfileModalContent = ({ currentUser, userProfile, setUserProfile, db, appId, closeModal }) => {
+    const [displayName, setDisplayName] = useState(userProfile?.displayName || '');
+    const [notificationStatus, setNotificationStatus] = useState('unknown');
+    const [isEnablingNotifications, setIsEnablingNotifications] = useState(false);
+
+    useEffect(() => {
+        // Check if notifications are supported
+        if ('Notification' in window) {
+            setNotificationStatus(Notification.permission);
+        }
+    }, []);
+
+    const handleSave = async () => {
+        const userDocRef = doc(db, `artifacts/${appId}/public/data/users/${currentUser.uid}`);
+        const newProfile = { ...userProfile, displayName };
+        await setDoc(userDocRef, newProfile, { merge: true });
+        setUserProfile(newProfile);
+        closeModal();
+    };
+
+    const enableNotifications = async () => {
+        if (!('Notification' in window) || !('PushManager' in window)) {
+            alert('Push notifications are not supported in your browser.');
+            return;
+        }
+
+        setIsEnablingNotifications(true);
+        
+        try {
+            // Request permission
+            const permission = await Notification.requestPermission();
+            setNotificationStatus(permission);
+            
+            if (permission === 'granted') {
+                // Register the service worker
+                const registration = await navigator.serviceWorker.ready;
+                
+                // Try to get VAPID key from environment variables
+                const vapidPublicKey = import.meta.env.VITE_VAPID_PUBLIC_KEY;
+                
+                if (!vapidPublicKey) {
+                    throw new Error("VAPID public key is missing. Add it to your environment variables.");
+                }
+                
+                // Convert base64 string to Uint8Array
+                const applicationServerKey = urlBase64ToUint8Array(vapidPublicKey);
+                
+                // Subscribe to push notifications
+                const subscription = await registration.pushManager.subscribe({
+                    userVisibleOnly: true,
+                    applicationServerKey
+                });
+                
+                // Save subscription to Firestore
+                const userDocRef = doc(db, `artifacts/${appId}/public/data/users/${currentUser.uid}`);
+                await setDoc(userDocRef, { 
+                    ...userProfile,
+                    notificationSubscription: subscription.toJSON() 
+                }, { merge: true });
+                
+                setUserProfile({
+                    ...userProfile,
+                    notificationSubscription: subscription.toJSON()
+                });
+                
+                alert('Notifications enabled successfully!');
+            }
+        } catch (error) {
+            console.error('Error enabling notifications:', error);
+            alert(`Failed to enable notifications: ${error.message}`);
+        } finally {
+            setIsEnablingNotifications(false);
+        }
+    };
+    
+    // Helper function to convert base64 to Uint8Array for VAPID key
+    const urlBase64ToUint8Array = (base64String) => {
+        const padding = '='.repeat((4 - base64String.length % 4) % 4);
+        const base64 = (base64String + padding)
+            .replace(/-/g, '+')
+            .replace(/_/g, '/');
+        
+        const rawData = window.atob(base64);
+        const outputArray = new Uint8Array(rawData.length);
+        
+        for (let i = 0; i < rawData.length; ++i) {
+            outputArray[i] = rawData.charCodeAt(i);
+        }
+        return outputArray;
+    };
+
+    return (
+        <div className="form-group-stack">
+            <div className="form-group">
+                <label>Display Name</label>
+                <input type="text" value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
+            </div>
+            <div className="form-group">
+                <label>User ID (for Admin setup)</label>
+                <input type="text" value={currentUser.uid} readOnly />
+            </div>
+            
+            {('Notification' in window) && (
+                <div className="form-group">
+                    <label>Push Notifications</label>
+                    <Button 
+                        onClick={enableNotifications} 
+                        variant={notificationStatus === 'granted' ? 'success' : 'primary'}
+                        disabled={notificationStatus === 'denied' || isEnablingNotifications}
+                    >
+                        <Bell className="icon" />
+                        {isEnablingNotifications ? 'Enabling...' : 
+                         notificationStatus === 'granted' ? 'Notifications Enabled' : 
+                         notificationStatus === 'denied' ? 'Notifications Blocked' : 
+                         'Enable Notifications'}
+                    </Button>
+                    {notificationStatus === 'denied' && (
+                        <p className="text-sm text-red">You've blocked notifications. Please update your browser settings to enable them.</p>
+                    )}
+                </div>
+            )}
+            
+            <Button onClick={handleSave} variant="primary">Save Profile</Button>
+        </div>
+    );
+};
+
+// --- Final Counts Views ---
+const renderFinalCountsAdmin = () => {
+    return (
+        <Card>
+            <h2 className="section-title"><Calculator className="icon"/> Final Chip Counts</h2>
+            <p className="text-sm">Enter or adjust the final chip counts for all players.</p>
+            <Button onClick={() => setView('game')} variant="secondary" className="back-btn">
+                <ArrowLeft className="icon"/> Back to Game
+            </Button>
+            
+            <div className="final-counts-list">
+                {players.map(player => {
+                    const finalCount = sessionData?.finalCounts?.[player.id] || 0;
+                    
+                    return (
+                        <div key={player.id} className="final-counts-item">
+                            <div className="player-name-group">
+                                <span>{player.name}</span>
+                                {player.status === 'joined' && <div className="status-dot joined" title="Joined"></div>}
+                                {player.status === 'guest' && <div className="status-dot guest" title="Guest"></div>}
+                            </div>
+                            <div className="input-group">
+                                <input 
+                                    type="number" 
+                                    value={finalCount} 
+                                    onChange={(e) => {
+                                        const count = parseInt(e.target.value) || 0;
+                                        const sessionRef = doc(db, `artifacts/${appId}/public/data/poker-sessions`, sessionId);
+                                        updateDoc(sessionRef, {
+                                            [`finalCounts.${player.id}`]: count
+                                        });
+                                    }}
+                                />
+                            </div>
+                        </div>
+                    );
+                })}
+            </div>
+            
+            <div className="game-summary-footer">
+                <Button 
+                    onClick={() => {
+                        handleEndGameCalculation(sessionData?.finalCounts || {});
+                    }} 
+                    variant="primary"
+                >
+                    <Calculator className="icon"/> Calculate Results
+                </Button>
+            </div>
+        </Card>
+    );
+};
+
+const renderFinalCountsPlayer = () => {
+    const currentPlayer = players.find(p => p.uid === currentUser.uid);
+    
+    if (!currentPlayer) {
+        return (
+            <Card>
+                <h2 className="section-title"><Calculator className="icon"/> Game Ending</h2>
+                <p>You are not a player in this game.</p>
+                <Button onClick={() => setView('game')} variant="secondary" className="back-btn">
+                    <ArrowLeft className="icon"/> Back to Game
+                </Button>
+            </Card>
+        );
+    }
+    
+    const finalCount = sessionData?.finalCounts?.[currentPlayer.id] || 0;
+    
+    return (
+        <Card>
+            <h2 className="section-title"><Calculator className="icon"/> Your Final Chip Count</h2>
+            <p className="text-sm">Please enter your final chip count accurately.</p>
+            <Button onClick={() => setView('game')} variant="secondary" className="back-btn">
+                <ArrowLeft className="icon"/> Back to Game
+            </Button>
+            
+            <div className="form-group">
+                <label>Your Final Chips</label>
+                <input 
+                    type="number"
+                    value={finalCount} 
+                    onChange={(e) => {
+                        const count = parseInt(e.target.value) || 0;
+                        const sessionRef = doc(db, `artifacts/${appId}/public/data/poker-sessions`, sessionId);
+                        updateDoc(sessionRef, {
+                            [`finalCounts.${currentPlayer.id}`]: count
+                        });
+                    }}
+                />
+            </div>
+            
+            <p className="text-sm">The game organizer will calculate final results after all players have submitted their counts.</p>
+        </Card>
+    );
+};
