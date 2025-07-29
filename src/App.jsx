@@ -4,6 +4,7 @@ import { initializeApp } from "firebase/app";
 import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "firebase/auth";
 import { getFirestore, doc, setDoc, onSnapshot, getDoc, collection, query, where, getDocs, updateDoc } from "firebase/firestore";
 
+
 // --- Firebase Configuration ---
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -182,6 +183,46 @@ export default function App() {
   return <MainApp currentUser={currentUser} userProfile={userProfile} setUserProfile={setUserProfile} auth={auth} db={db} isAdmin={isAdmin} isGameMaker={isGameMaker} appId={appId} />;
 }
 
+// ADDED: Notification setup
+useEffect(() => {
+  if ('serviceWorker' in navigator && 'PushManager' in window) {
+    // Register service worker
+    navigator.serviceWorker.register('/service-worker.js').then(registration => {
+      console.log('Service Worker registered with scope:', registration.scope);
+      // Request notification permission
+      Notification.requestPermission().then(permission => {
+        if (permission === 'granted') {
+          console.log('Notification permission granted.');
+          // Subscribe to push notifications
+          registration.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: urlBase64ToUint8Array(import.meta.env.VITE_VAPID_PUBLIC_KEY)
+          }).then(subscription => {
+            // Save subscription to Firestore
+            const subscriptionRef = doc(db, `artifacts/${appId}/public/data/users/${currentUser.uid}/subscriptions`, getDeviceId());
+            setDoc(subscriptionRef, { subscription: JSON.parse(JSON.stringify(subscription)) });
+          });
+        }
+      });
+    }).catch(err => console.error('Service Worker registration failed:', err));
+  }
+}, [db, appId, currentUser.uid]);
+
+// Helper function to convert VAPID key
+const urlBase64ToUint8Array = (base64String) => {
+  const padding = '='.repeat((4 - base64String.length % 4) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = window.atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; ++i) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  return outputArray;
+};
+
+const [currentBlindIndex, setCurrentBlindIndex] = useState(0);
+const [isRunning, setIsRunning] = useState(false);
+const [timeLeft, setTimeLeft] = useState(480);
 
 // --- Main Application Logic (after login) ---
 function MainApp({ currentUser, userProfile, setUserProfile, auth, db, isAdmin, isGameMaker, appId }) {
@@ -287,30 +328,33 @@ function MainApp({ currentUser, userProfile, setUserProfile, auth, db, isAdmin, 
     return `${datePrefix}-${nextId}`;
   };
 
-  const startNewSession = async () => {
-    setIsLoadingSession(true);
-    if (unsubscribeRef.current) unsubscribeRef.current();
-    const newSessionId = await findNextSessionId();
-    const initialState = {
-        players: [],
-        transactionLog: [{ id: Date.now(), timestamp: new Date().toISOString(), type: 'New Game', message: `Session ${newSessionId} started.`, ip: userIp }],
-        chipValue: 0.5,
-        finalCalculations: null,
-        gameState: 'in_progress',
-        datePrefix: newSessionId.split('-')[0],
-        blinds: [
-            { sb: 5, bb: 10 }, { sb: 10, bb: 20 }, { sb: 15, bb: 30 }, { sb: 20, bb: 40 }, { sb: 25, bb: 50 }, { sb: 30, bb: 60 }
-        ],
-        timerDuration: 480, // 8 minutes
-    };
-    const sessionRef = doc(db, `artifacts/${appId}/public/data/poker-sessions`, newSessionId);
-    await setDoc(sessionRef, initialState);
-    await fetchRecentSessions();
-    setSessionId(newSessionId);
-    listenToSession(newSessionId);
-    setSessionActive(true);
-    setIsLoadingSession(false);
+const startNewSession = async () => {
+  setIsLoadingSession(true);
+  if (unsubscribeRef.current) unsubscribeRef.current();
+  const newSessionId = await findNextSessionId();
+  const initialState = {
+    players: [],
+    transactionLog: [{ id: Date.now(), timestamp: new Date().toISOString(), type: 'New Game', message: `Session ${newSessionId} started.`, ip: userIp }],
+    chipValue: 0.5,
+    finalCalculations: null,
+    gameState: 'in_progress',
+    datePrefix: newSessionId.split('-')[0],
+    blinds: [
+      { sb: 5, bb: 10 }, { sb: 10, bb: 20 }, { sb: 15, bb: 30 },
+      { sb: 20, bb: 40 }, { sb: 25, bb: 50 }, { sb: 30, bb: 60 }
+    ],
+    timerDuration: 480, // 8 minutes
+    currentBlindIndex: 0, // ADDED: Initial blind index
+    timerRunning: false // ADDED: Timer running state
   };
+  const sessionRef = doc(db, `artifacts/${appId}/public/data/poker-sessions`, newSessionId);
+  await setDoc(sessionRef, initialState);
+  await fetchRecentSessions();
+  setSessionId(newSessionId);
+  listenToSession(newSessionId);
+  setSessionActive(true);
+  setIsLoadingSession(false);
+};
   
   const loadSession = async (sid) => {
     if (!sid) return;
@@ -339,19 +383,27 @@ function MainApp({ currentUser, userProfile, setUserProfile, auth, db, isAdmin, 
       }
   }
   
-  const listenToSession = (sid) => {
-    const sessionRef = doc(db, `artifacts/${appId}/public/data/poker-sessions`, sid);
-    unsubscribeRef.current = onSnapshot(sessionRef, (doc) => {
-      if (doc.exists()) {
-        const data = doc.data();
-        setSessionData(data);
-        setPlayers(data.players || []);
-        setTransactionLog(data.transactionLog || []);
-        setChipValue(data.chipValue || 0.5);
-        setFinalCalculations(data.finalCalculations || null);
+const listenToSession = (sid) => {
+  const sessionRef = doc(db, `artifacts/${appId}/public/data/poker-sessions`, sid);
+  unsubscribeRef.current = onSnapshot(sessionRef, (doc) => {
+    if (doc.exists()) {
+      const data = doc.data();
+      setSessionData(data);
+      setPlayers(data.players || []);
+      setTransactionLog(data.transactionLog || []);
+      setChipValue(data.chipValue || 0.5);
+      setFinalCalculations(data.finalCalculations || null);
+      // CHANGE: Open end-game modal when gameState is 'awaiting_counts'
+      if (data.gameState === 'awaiting_counts' && !modal.isOpen) {
+        openModal('end-game');
       }
-    });
-  };
+      // ADDED: Sync timer state
+      setCurrentBlindIndex(data.currentBlindIndex || 0);
+      setIsRunning(data.timerRunning || false);
+      setTimeLeft(data.timerDuration || 480);
+    }
+  });
+};
 
   useEffect(() => {
     if (!sessionActive || isLoadingSession) return;
@@ -394,8 +446,21 @@ function MainApp({ currentUser, userProfile, setUserProfile, auth, db, isAdmin, 
   };
 
   const formatMoney = (amountInChips) => { const value = amountInChips * chipValue; return `${currencySymbol}${value.toFixed(2)}`; };
-  const logTransaction = (log) => { const newLog = { id: Date.now(), timestamp: new Date().toISOString(), ip: userIp, ...log }; setTransactionLog(prevLogs => [...prevLogs, newLog]); sendToDiscord(newLog); };
-  
+const logTransaction = (log) => {
+  const newLog = { id: Date.now(), timestamp: new Date().toISOString(), ip: userIp, ...log };
+  setTransactionLog(prevLogs => [...prevLogs, newLog]);
+  sendToDiscord(newLog);
+  // ADDED: Send push notification
+  if ('serviceWorker' in navigator && 'PushManager' in window) {
+    navigator.serviceWorker.ready.then(registration => {
+      registration.showNotification('New Poker Ledger Transaction', {
+        body: `${log.type}${log.player ? ` for ${log.player}` : ''}${log.amount ? `: ${log.amount} chips` : ''}`,
+        icon: '/icon.png',
+        badge: '/badge.png'
+      });
+    });
+  }
+};  
   const addPlayer = async (name, buyIn = 0, isGuest = true) => {
     const trimmedName = name.trim();
     if (trimmedName && !players.some(p => p.name.toLowerCase() === trimmedName.toLowerCase())) {
@@ -580,7 +645,81 @@ function MainApp({ currentUser, userProfile, setUserProfile, auth, db, isAdmin, 
   };
 
   const renderAddPlayerForm = () => ( <Card> <h2 className="section-title"><Users className="icon"/>Add Guest Players</h2> <form className="add-player-form" onSubmit={(e) => handleAddPlayer(e, 400)}> <input type="text" value={newPlayerName} onChange={(e) => setNewPlayerName(e.target.value)} placeholder="Enter guest's name"/> <div className="button-group"> <Button onClick={(e) => handleAddPlayer(e, 0)} variant="secondary" disabled={!newPlayerName.trim()}>Add Guest</Button> <Button type="submit" variant="primary" disabled={!newPlayerName.trim()}>Add Guest & Buy-in 400</Button> </div> </form> <div className="quick-add-section"> <h3>Quick Add Guests</h3> <div className="quick-add-grid"> {quickAddPlayers.map(name => ( <Button key={name} onClick={() => handleQuickAdd(name)} variant="success" disabled={players.some(p => p.name === name)}> <Plus size={16} className="icon"/> {name} </Button> ))} </div> </div> </Card> );
-  const renderPlayerList = () => ( <Card> <h2 className="section-title">Lobby & Game</h2> <div className="player-list"> {players.map(player => ( <div key={player.id} className={`player-list-item ${player.uid === currentUser.uid ? 'is-current-user' : ''}`}> <div className="player-list-item-header"> <div className="player-name-group"> <button onClick={() => togglePlayerExpansion(player.id)} className="player-name-btn"> {player.name} {player.status === 'joined' ? <span className="status-dot joined"></span> : <span className="status-dot guest"></span>} {expandedPlayerId === player.id ? <ChevronUp className="icon-sm"/> : <ChevronDown className="icon-sm"/>} </button> {isAdmin && <Button onClick={() => toggleQuickAdd(player.name)} variant="secondary" className={`promptpay-btn ${quickAddPlayers.includes(player.name) ? 'is-quick-add' : ''}`}><Star size={14}/></Button>} <Button onClick={() => openModal('edit-player', player)} variant="secondary" className="promptpay-btn">PromptPay ID</Button> </div> <div className="player-info-group"> <span>Net Buy-in: <strong>{player.buyIn} chips</strong></span> <div className="button-group"> {player.status === 'guest' && !hasJoined && <Button onClick={() => openModal('self-buy-in', { player })} variant="success">Join Game</Button>} {(isAdmin || isGameMaker) && <> <Button onClick={() => openModal('buy-in', player)} variant="primary">Buy Chips</Button> <Button onClick={() => openModal('cash-out', player)} variant="secondary" disabled={player.buyIn <= 0}>Cash Out</Button> </>} </div> </div> </div> {expandedPlayerId === player.id && ( <div className="transaction-history-container"> <h4>Transaction History</h4> <ul> {transactionLog.filter(log => log.player === player.name || (log.source && log.source.includes(player.name))).map(log => { if (log.source && log.source.includes(player.name)) { return ( <li key={log.id} className="log-sold"> <span>{new Date(log.timestamp).toLocaleTimeString()} - Sold Chips</span> <span>{log.amount && `${log.amount} chips`} (to {log.player})</span> </li> ); } let logClass = ''; if (log.type.includes('Buy-in')) { logClass = log.source === 'Central Box' ? 'log-buy-box' : 'log-buy-player'; } else if (log.type === 'Cash Out') { logClass = 'log-cashout'; } return ( <li key={log.id} className={logClass}> <span>{new Date(log.timestamp).toLocaleTimeString()} - {log.type}</span> <span>{log.amount && `${log.amount} chips`} {log.source && `(${log.source})`}</span> </li> ); })} </ul> </div> )} </div> ))} </div> <div className="game-summary-footer"> <h3>Total in Play (from Box): <span className="text-green">{totalBuyInFromBox} chips</span></h3> {(isAdmin || isGameMaker) && <Button onClick={() => { const sessionRef = doc(db, `artifacts/${appId}/public/data/poker-sessions`, sessionId); updateDoc(sessionRef, { gameState: 'awaiting_counts' }); }} variant="danger" disabled={players.length < 2}> <Calculator className="icon"/> End Game </Button>} </div> </Card> );
+const renderPlayerList = () => (
+  <Card>
+    <h2 className="section-title">Lobby & Game</h2>
+    <div className="player-list">
+      {players.map(player => (
+        <div key={player.id} className={`player-list-item ${player.uid === currentUser.uid ? 'is-current-user' : ''}`}>
+          <div className="player-list-item-header">
+            <div className="player-name-group">
+              <button onClick={() => togglePlayerExpansion(player.id)} className="player-name-btn">
+                {player.name} {player.status === 'joined' ? <span className="status-dot joined"></span> : <span className="status-dot guest"></span>}
+                {expandedPlayerId === player.id ? <ChevronUp className="icon-sm"/> : <ChevronDown className="icon-sm"/>}
+              </button>
+              {isAdmin && <Button onClick={() => toggleQuickAdd(player.name)} variant="secondary" className={`promptpay-btn ${quickAddPlayers.includes(player.name) ? 'is-quick-add' : ''}`}><Star size={14}/></Button>}
+              <Button onClick={() => openModal('edit-player', player)} variant="secondary" className="promptpay-btn">PromptPay ID</Button>
+            </div>
+            <div className="player-info-group">
+              <span>Net Buy-in: <strong>{player.buyIn} chips</strong></span>
+              <div className="button-group">
+                {player.status === 'guest' && !hasJoined && <Button onClick={() => openModal('self-buy-in', { player })} variant="success">Join Game</Button>}
+                {(isAdmin || isGameMaker) && (
+                  <>
+                    <Button onClick={() => openModal('buy-in', player)} variant="primary">Buy Chips</Button>
+                    <Button onClick={() => openModal('cash-out', player)} variant="secondary" disabled={player.buyIn <= 0}>Cash Out</Button>
+                  </>
+                )}
+                {/* ADDED: Button for current user to request buy-in */}
+                {player.uid === currentUser.uid && (
+                  <Button onClick={() => openModal('self-request-buy-in', player)} variant="primary">Request Buy-in</Button>
+                )}
+              </div>
+            </div>
+          </div>
+          {expandedPlayerId === player.id && (
+            <div className="transaction-history-container">
+              <h4>Transaction History</h4>
+              <ul>
+                {transactionLog.filter(log => log.player === player.name || (log.source && log.source.includes(player.name))).map(log => {
+                  if (log.source && log.source.includes(player.name)) {
+                    return (
+                      <li key={log.id} className="log-sold">
+                        <span>{new Date(log.timestamp).toLocaleTimeString()} - Sold Chips</span>
+                        <span>{log.amount && `${log.amount} chips`} (to {log.player})</span>
+                      </li>
+                    );
+                  }
+                  let logClass = '';
+                  if (log.type.includes('Buy-in')) {
+                    logClass = log.source === 'Central Box' ? 'log-buy-box' : 'log-buy-player';
+                  } else if (log.type === 'Cash Out') {
+                    logClass = 'log-cashout';
+                  }
+                  return (
+                    <li key={log.id} className={logClass}>
+                      <span>{new Date(log.timestamp).toLocaleTimeString()} - {log.type}</span>
+                      <span>{log.amount && `${log.amount} chips`} {log.source && `(${log.source})`}</span>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+    <div className="game-summary-footer">
+      <h3>Total in Play (from Box): <span className="text-green">{totalBuyInFromBox} chips</span></h3>
+      {(isAdmin || isGameMaker) && <Button onClick={() => { 
+        const sessionRef = doc(db, `artifacts/${appId}/public/data/poker-sessions`, sessionId); 
+        updateDoc(sessionRef, { gameState: 'awaiting_counts' }); 
+      }} variant="danger" disabled={players.length < 2}>
+        <Calculator className="icon"/> End Game
+      </Button>}
+    </div>
+  </Card>
+);
   const renderSummary = () => ( <Card className="summary-card"> <h2 className="summary-title">Game Over: Final Tally</h2> <p className="session-id-summary">Session ID: {sessionId}</p> <h3 className="section-title">Player Results</h3> <div className="player-results-list"> {finalCalculations.players.map(player => ( <div key={player.id} className="player-result-item"> <button onClick={() => toggleSummaryExpansion(player.id)} className="player-result-header"> <div> <span>{player.name}</span> <div className="player-result-details">Net Buy-in: {player.buyIn} chips | Final: {player.finalChips} chips</div> </div> <div className="player-result-balance-group"> <span className={player.balance >= 0 ? 'text-green' : 'text-red'}> {player.balance >= 0 ? `+ ${formatMoney(player.balance)}` : `- ${formatMoney(Math.abs(player.balance))}`} </span> {expandedSummaryPlayerId === player.id ? <ChevronUp className="icon-sm"/> : <ChevronDown className="icon-sm"/>} </div> </button> {expandedSummaryPlayerId === player.id && ( <div className="transaction-history-container"> <h4>Transaction History</h4> <ul> {transactionLog.filter(log => log.player === player.name || (log.source && log.source.includes(player.name))).map(log => { if (log.source && log.source.includes(player.name)) { return ( <li key={log.id} className="log-sold"> <span>{new Date(log.timestamp).toLocaleTimeString()} - Sold Chips</span> <span>{log.amount && `${log.amount} chips`} (to {log.player})</span> </li> ); } let logClass = ''; if (log.type.includes('Buy-in')) { logClass = log.source === 'Central Box' ? 'log-buy-box' : 'log-buy-player'; } else if (log.type === 'Cash Out') { logClass = 'log-cashout'; } return ( <li key={log.id} className={logClass}> <span>{new Date(log.timestamp).toLocaleTimeString()} - {log.type}</span> <span>{log.amount && `${log.amount} chips`} {log.source && `(${log.source})`}</span> </li> ); })} </ul> </div> )} </div> ))} </div> <h3 className="section-title">Settlement Transactions</h3> <div className="settlement-list"> {finalCalculations.transactions.map((t, index) => { const recipient = players.find(p => p.name === t.to); const hasPromptPay = recipient && recipient.promptpayId; const qrUrl = hasPromptPay ? `https://promptpay.io/${recipient.promptpayId}/${(t.amount * chipValue).toFixed(2)}` : ''; return ( <button key={index} onClick={() => { if(hasPromptPay) { openModal('show-qr', { url: qrUrl, from: t.from, to: t.to, amount: t.amount }) } else { openModal('no-qr', { from: t.from, to: t.to, amount: t.amount }) } }} className="settlement-item"> <span className="text-red">{t.from}</span> <ArrowRight className="icon-sm" /> <span className="text-green">{t.to}</span> <ArrowRight className="icon-sm" /> <span>{formatMoney(t.amount)}</span> </button> );})} </div> <div className="summary-actions"> <Button onClick={handleBackToGame} variant="secondary"> <ArrowLeft className="icon"/> Back to Game </Button> <Button onClick={resetGame} variant="primary"> <Eraser className="icon"/> Start New Session </Button> </div> </Card> );
   const BuyInModalContent = () => {
     const [amount, setAmount] = useState('400');
@@ -611,7 +750,40 @@ function MainApp({ currentUser, userProfile, setUserProfile, auth, db, isAdmin, 
     const [amount, setAmount] = useState('400');
     const { player, isNewPlayer, name } = modal.data;
     const playerName = isNewPlayer ? name : player.name;
+    const SelfRequestBuyInModalContent = () => {
+    const [amount, setAmount] = useState('400');
+    const [source, setSource] = useState('central-box');
+    const player = modal.data;
+    const potentialSellers = players.filter(p => p.id !== player.id && p.buyIn >= parseInt(amount || 0));
 
+    return (
+        <div className="form-group-stack">
+        <p>Request buy-in for <strong>{player.name}</strong>.</p>
+        <input
+            type="number"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            placeholder="0"
+            min="1"
+            step="1"
+        />
+        <p>Buy from:</p>
+        <select value={source} onChange={(e) => setSource(e.target.value)}>
+            <option value="central-box">Central Box</option>
+            {potentialSellers.map(p => (
+            <option key={p.id} value={p.id}>{p.name} (Net Buy-in: {p.buyIn} chips)</option>
+            ))}
+        </select>
+        <Button 
+            onClick={() => handleBuyIn(player.id, parseInt(amount || 0), source)} 
+            variant="success" 
+            disabled={!amount || parseInt(amount) <= 0 || (source !== 'central-box' && !potentialSellers.some(p => p.id === parseInt(source)))}
+        >
+            Request Buy-in
+        </Button>
+        </div>
+    );
+    };
     return (
       <div className="form-group-stack">
         <p>Enter your initial buy-in amount for <strong>{playerName}</strong>.</p>
@@ -732,39 +904,65 @@ function MainApp({ currentUser, userProfile, setUserProfile, auth, db, isAdmin, 
         </div>
       </header>
       <main>
-          {!sessionActive ? ( renderSessionManager() ) : finalCalculations ? ( renderSummary() ) : (
-              <>
-                  {isLoadingSession ? <p className="loading-text">Loading Session...</p> : 
-                  <>
-                      <div className="main-grid">
-                          {renderSessionManager()}
-                          {(isAdmin || isGameMaker) && renderAddPlayerForm()}
-                          {!hasJoined && renderJoinLobby()}
-                          {players.length > 0 ? renderPlayerList() : (
-                            !isAdmin && !isGameMaker && <Card><p className="text-center">Lobby is empty. Join the game or ask a Game Maker to add guests.</p></Card>
-                          )}
-                      </div>
-                  </>
-                  }
-              </>
-          )}
-      </main>
+  {view === 'blinds' && sessionActive ? (
+    <BlindsTimer
+      sessionData={sessionData}
+      sessionId={sessionId}
+      db={db}
+      appId={appId}
+      isAdmin={isAdmin}
+      isGameMaker={isGameMaker}
+    />
+  ) : !sessionActive ? (
+    renderSessionManager()
+  ) : finalCalculations ? (
+    renderSummary()
+  ) : (
+    <>
+      {isLoadingSession ? <p className="loading-text">Loading Session...</p> : 
+        <>
+          <div className="main-grid">
+            {renderSessionManager()}
+            {(isAdmin || isGameMaker) && renderAddPlayerForm()}
+            {!hasJoined && renderJoinLobby()}
+            {players.length > 0 ? renderPlayerList() : (
+              !isAdmin && !isGameMaker && <Card><p className="text-center">Lobby is empty. Join the game or ask a Game Maker to add guests.</p></Card>
+            )}
+          </div>
+        </>
+      }
+    </>
+  )}
+</main>
       <footer>
           <p>&copy; 2024 - Built for poker nights with friends.</p>
           <button onClick={() => setShowConsole(true)} disabled={!sessionActive}> <BookOpen className="icon-sm"/> Show Log </button>
       </footer>
-      <Modal isOpen={modal.isOpen} onClose={closeModal} title={ modal.type === 'buy-in' ? 'Buy Chips' : modal.type === 'cash-out' ? 'Cash Out' : modal.type === 'end-game' ? 'End Game' : modal.type === 'error' ? <><AlertTriangle className="icon"/> Balance Error</> : modal.type === 'settings' ? <><Settings className="icon"/> Global Settings</> : modal.type === 'edit-player' ? <><QrCode className="icon"/> Edit PromptPay ID</> : modal.type === 'show-qr' ? 'PromptPay Payment' : modal.type === 'no-qr' ? 'Manual Transfer Required' : modal.type === 'self-buy-in' ? 'Join & Buy-in' : modal.type === 'profile' ? 'Edit Profile' : '' }>
-          {modal.type === 'buy-in' && <BuyInModalContent />}
-          {modal.type === 'cash-out' && <CashOutModalContent />}
-          {modal.type === 'end-game' && <EndGameModalContent />}
-          {modal.type === 'error' && <ErrorModalContent />}
-          {modal.type === 'settings' && <SettingsModalContent />}
-          {modal.type === 'edit-player' && <EditPlayerModalContent />}
-          {modal.type === 'show-qr' && <QrCodeModalContent />}
-          {modal.type === 'no-qr' && <NoQrCodeModalContent />}
-          {modal.type === 'self-buy-in' && <SelfBuyInModalContent />}
-          {modal.type === 'profile' && <ProfileModalContent currentUser={currentUser} userProfile={userProfile} setUserProfile={setUserProfile} db={db} appId={appId} closeModal={closeModal} />}
-      </Modal>
+      <Modal isOpen={modal.isOpen} onClose={closeModal} title={
+  modal.type === 'buy-in' ? 'Buy Chips' :
+  modal.type === 'cash-out' ? 'Cash Out' :
+  modal.type === 'end-game' ? 'End Game' :
+  modal.type === 'error' ? <><AlertTriangle className="icon"/> Balance Error</> :
+  modal.type === 'settings' ? <><Settings className="icon"/> Global Settings</> :
+  modal.type === 'edit-player' ? <><QrCode className="icon"/> Edit PromptPay ID</> :
+  modal.type === 'show-qr' ? 'PromptPay Payment' :
+  modal.type === 'no-qr' ? 'Manual Transfer Required' :
+  modal.type === 'self-buy-in' ? 'Join & Buy-in' :
+  modal.type === 'self-request-buy-in' ? 'Request Buy-in' : // ADDED: New modal type
+  modal.type === 'profile' ? 'Edit Profile' : ''
+}>
+  {modal.type === 'buy-in' && <BuyInModalContent />}
+  {modal.type === 'cash-out' && <CashOutModalContent />}
+  {modal.type === 'end-game' && <EndGameModalContent />}
+  {modal.type === 'error' && <ErrorModalContent />}
+  {modal.type === 'settings' && <SettingsModalContent />}
+  {modal.type === 'edit-player' && <EditPlayerModalContent />}
+  {modal.type === 'show-qr' && <QrCodeModalContent />}
+  {modal.type === 'no-qr' && <NoQrCodeModalContent />}
+  {modal.type === 'self-buy-in' && <SelfBuyInModalContent />}
+  {modal.type === 'self-request-buy-in' && <SelfRequestBuyInModalContent />} {/* ADDED: New modal content */}
+  {modal.type === 'profile' && <ProfileModalContent currentUser={currentUser} userProfile={userProfile} setUserProfile={setUserProfile} db={db} appId={appId} closeModal={closeModal} />}
+</Modal>
       <ConsoleLog />
     </div>
   );
@@ -795,4 +993,109 @@ function ProfileModalContent({ currentUser, userProfile, setUserProfile, db, app
             <Button onClick={handleSave} variant="primary">Save Profile</Button>
         </div>
     );
+}
+
+function BlindsTimer({ sessionData, sessionId, db, appId, isAdmin, isGameMaker }) {
+  const [currentBlindIndex, setCurrentBlindIndex] = useState(0);
+  const [timeLeft, setTimeLeft] = useState(sessionData?.timerDuration || 480);
+  const [isRunning, setIsRunning] = useState(false);
+  const blinds = sessionData?.blinds || [
+    { sb: 5, bb: 10 }, { sb: 10, bb: 20 }, { sb: 15, bb: 30 },
+    { sb: 20, bb: 40 }, { sb: 25, bb: 50 }, { sb: 30, bb: 60 }
+  ];
+
+  useEffect(() => {
+    let timer;
+    if (isRunning && timeLeft > 0) {
+      timer = setInterval(() => {
+        setTimeLeft(prev => {
+          if (prev <= 1) {
+            setCurrentBlindIndex(prevIndex => Math.min(prevIndex + 1, blinds.length - 1));
+            return sessionData?.timerDuration || 480;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    }
+    return () => clearInterval(timer);
+  }, [isRunning, timeLeft, sessionData?.timerDuration, blinds.length]);
+
+  const handleStartPause = () => {
+    setIsRunning(prev => !prev);
+    if (!isRunning && db && (isAdmin || isGameMaker)) {
+      const sessionRef = doc(db, `artifacts/${appId}/public/data/poker-sessions`, sessionId);
+      updateDoc(sessionRef, { currentBlindIndex, timerRunning: !isRunning });
+    }
+  };
+
+  const handleReset = () => {
+    setTimeLeft(sessionData?.timerDuration || 480);
+    setCurrentBlindIndex(0);
+    setIsRunning(false);
+    if (db && (isAdmin || isGameMaker)) {
+      const sessionRef = doc(db, `artifacts/${appId}/public/data/poker-sessions`, sessionId);
+      updateDoc(sessionRef, { currentBlindIndex: 0, timerRunning: false });
+    }
+  };
+
+  const handleSkipForward = () => {
+    setCurrentBlindIndex(prev => Math.min(prev + 1, blinds.length - 1));
+    setTimeLeft(sessionData?.timerDuration || 480);
+    if (db && (isAdmin || isGameMaker)) {
+      const sessionRef = doc(db, `artifacts/${appId}/public/data/poker-sessions`, sessionId);
+      updateDoc(sessionRef, { currentBlindIndex: Math.min(currentBlindIndex + 1, blinds.length - 1) });
+    }
+  };
+
+  const handleSkipBack = () => {
+    setCurrentBlindIndex(prev => Math.max(prev - 1, 0));
+    setTimeLeft(sessionData?.timerDuration || 480);
+    if (db && (isAdmin || isGameMaker)) {
+      const sessionRef = doc(db, `artifacts/${appId}/public/data/poker-sessions`, sessionId);
+      updateDoc(sessionRef, { currentBlindIndex: Math.max(currentBlindIndex - 1, 0) });
+    }
+  };
+
+  const formatTime = (seconds) => {
+    const minutes = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${minutes}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  return (
+    <Card>
+      <h2 className="section-title">Blinds Timer</h2>
+      <div className="blinds-timer">
+        <h3>Current Blinds: {blinds[currentBlindIndex].sb}/{blinds[currentBlindIndex].bb}</h3>
+        <p>Time Left: {formatTime(timeLeft)}</p>
+        {(isAdmin || isGameMaker) && (
+          <div className="timer-controls">
+            <Button onClick={handleStartPause} variant={isRunning ? 'danger' : 'success'}>
+              {isRunning ? <Pause className="icon"/> : <Play className="icon"/>}
+              {isRunning ? 'Pause' : 'Start'}
+            </Button>
+            <Button onClick={handleReset} variant="secondary">
+              <RefreshCw className="icon"/> Reset
+            </Button>
+            <Button onClick={handleSkipBack} variant="secondary" disabled={currentBlindIndex === 0}>
+              <SkipBack className="icon"/> Previous
+            </Button>
+            <Button onClick={handleSkipForward} variant="secondary" disabled={currentBlindIndex === blinds.length - 1}>
+              <SkipForward className="icon"/> Next
+            </Button>
+          </div>
+        )}
+        <div className="blinds-schedule">
+          <h4>Blinds Schedule</h4>
+          <ul>
+            {blinds.map((blind, index) => (
+              <li key={index} className={index === currentBlindIndex ? 'current-blind' : ''}>
+                Level {index + 1}: {blind.sb}/{blind.bb}
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+    </Card>
+  );
 }
