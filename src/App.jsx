@@ -3,6 +3,7 @@ import { Plus, ArrowRight, X, Users, DollarSign, Calculator, Eraser, AlertTriang
 import { initializeApp } from "firebase/app";
 import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "firebase/auth";
 import { getFirestore, doc, setDoc, onSnapshot, getDoc, collection, query, where, getDocs, updateDoc, serverTimestamp } from "firebase/firestore";
+import { getMessaging, getToken } from "firebase/messaging"; // Import Firebase Messaging
 
 // --- Firebase Configuration ---
 // This should be populated by your environment variables (e.g., Vite)
@@ -101,6 +102,7 @@ function AuthModal({ isOpen, onClose, auth, initialMode }) {
 export default function App() {
   const [auth, setAuth] = useState(null);
   const [db, setDb] = useState(null);
+  const [messaging, setMessaging] = useState(null);
   const [currentUser, setCurrentUser] = useState(null);
   const [userProfile, setUserProfile] = useState(null);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -114,6 +116,12 @@ export default function App() {
         const app = initializeApp(firebaseConfig);
         const authInstance = getAuth(app);
         const firestoreInstance = getFirestore(app);
+        // Initialize messaging only if supported
+        if ('Notification' in window && 'serviceWorker' in navigator && 'PushManager' in window) {
+            const messagingInstance = getMessaging(app);
+            setMessaging(messagingInstance);
+        }
+
         setAuth(authInstance);
         setDb(firestoreInstance);
 
@@ -163,7 +171,7 @@ export default function App() {
 
   if (isLoading) return <div className="loading-fullscreen">Loading...</div>;
   if (!currentUser) return <><WelcomePage onLogin={() => openAuthModal('login')} onRegister={() => openAuthModal('register')} /><AuthModal isOpen={authModal.isOpen} onClose={closeAuthModal} auth={auth} initialMode={authModal.mode} /></>;
-  return <MainApp currentUser={currentUser} userProfile={userProfile} setUserProfile={setUserProfile} auth={auth} db={db} isAdmin={isAdmin} isGameMaker={isGameMaker} appId={appId} />;
+  return <MainApp currentUser={currentUser} userProfile={userProfile} setUserProfile={setUserProfile} auth={auth} db={db} messaging={messaging} isAdmin={isAdmin} isGameMaker={isGameMaker} appId={appId} />;
 }
 
 // --- Independent Components ---
@@ -290,7 +298,7 @@ const FinalCountsView = ({ sessionData, players, currentUser, isAdmin, isGameMak
 };
 
 // --- Main Application Logic (after login) ---
-function MainApp({ currentUser, userProfile, setUserProfile, auth, db, isAdmin, isGameMaker, appId }) {
+function MainApp({ currentUser, userProfile, setUserProfile, auth, db, messaging, isAdmin, isGameMaker, appId }) {
     const [view, setView] = useState('game');
     const [players, setPlayers] = useState([]);
     const [transactionLog, setTransactionLog] = useState([]);
@@ -606,7 +614,6 @@ function MainApp({ currentUser, userProfile, setUserProfile, auth, db, isAdmin, 
             return;
         }
         try {
-            // FIX: Corrected the path to have an odd number of segments
             const taskRef = doc(collection(db, `artifacts/${appId}/tasks`));
             await setDoc(taskRef, {
                 type: 'sendTestNotification',
@@ -920,7 +927,7 @@ function MainApp({ currentUser, userProfile, setUserProfile, auth, db, isAdmin, 
                 {modal.type === 'cash-out' && <CashOutModalContent />}
                 {modal.type === 'error' && <ErrorModalContent />}
                 {modal.type === 'settings' && <SettingsModalContent />}
-                {modal.type === 'profile' && <ProfileModalContent currentUser={currentUser} userProfile={userProfile} setUserProfile={setUserProfile} db={db} appId={appId} closeModal={closeModal} />}
+                {modal.type === 'profile' && <ProfileModalContent currentUser={currentUser} userProfile={userProfile} setUserProfile={setUserProfile} db={db} messaging={messaging} appId={appId} closeModal={closeModal} />}
                 {modal.type === 'edit-player' && <EditPlayerModalContent />}
                 {modal.type === 'show-qr' && <QrCodeModalContent />}
                 {modal.type === 'no-qr' && <NoQrCodeModalContent />}
@@ -929,7 +936,7 @@ function MainApp({ currentUser, userProfile, setUserProfile, auth, db, isAdmin, 
     );
 }
 
-const ProfileModalContent = ({ currentUser, userProfile, setUserProfile, db, appId, closeModal }) => {
+const ProfileModalContent = ({ currentUser, userProfile, setUserProfile, db, messaging, appId, closeModal }) => {
     const [displayName, setDisplayName] = useState(userProfile?.displayName || '');
     const [notificationStatus, setNotificationStatus] = useState('unknown');
     const [isEnablingNotifications, setIsEnablingNotifications] = useState(false);
@@ -947,21 +954,10 @@ const ProfileModalContent = ({ currentUser, userProfile, setUserProfile, db, app
         setUserProfile(newProfile);
         closeModal();
     };
-
-    const urlBase64ToUint8Array = (base64String) => {
-        const padding = '='.repeat((4 - base64String.length % 4) % 4);
-        const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
-        const rawData = window.atob(base64);
-        const outputArray = new Uint8Array(rawData.length);
-        for (let i = 0; i < rawData.length; ++i) {
-            outputArray[i] = rawData.charCodeAt(i);
-        }
-        return outputArray;
-    };
     
     const enableNotifications = async () => {
-        if (!('Notification' in window) || !('serviceWorker' in navigator) || !('PushManager' in window)) {
-            alert('Push notifications are not supported in your browser.');
+        if (!messaging) {
+            alert("Firebase Messaging is not initialized. Your browser may not support push notifications.");
             return;
         }
 
@@ -972,27 +968,36 @@ const ProfileModalContent = ({ currentUser, userProfile, setUserProfile, db, app
             setNotificationStatus(permission);
             
             if (permission === 'granted') {
-                const registration = await navigator.serviceWorker.ready;
-                const vapidPublicKey = import.meta.env.VITE_VAPID_PUBLIC_KEY;
+                console.log("Notification permission granted.");
                 
-                if (!vapidPublicKey) {
+                const vapidKey = import.meta.env.VITE_VAPID_PUBLIC_KEY;
+                if (!vapidKey) {
                     throw new Error("VAPID public key is missing from environment variables (VITE_VAPID_PUBLIC_KEY).");
                 }
-                
-                const subscription = await registration.pushManager.subscribe({
-                    userVisibleOnly: true,
-                    applicationServerKey: urlBase64ToUint8Array(vapidPublicKey)
-                });
-                
-                const userDocRef = doc(db, `artifacts/${appId}/public/data/users/${currentUser.uid}`);
-                const newProfileData = { ...userProfile, displayName, notificationSubscription: subscription.toJSON() };
-                await setDoc(userDocRef, newProfileData, { merge: true });
-                setUserProfile(newProfileData);
-                
-                alert('Notifications enabled successfully!');
+
+                // Get the token
+                const currentToken = await getToken(messaging, { vapidKey: vapidKey });
+
+                if (currentToken) {
+                    console.log('FCM Token:', currentToken);
+                    // Save the token to Firestore. Using a different field for FCM token.
+                    const userDocRef = doc(db, `artifacts/${appId}/public/data/users/${currentUser.uid}`);
+                    await setDoc(userDocRef, { 
+                        notificationToken: currentToken,
+                    }, { merge: true });
+
+                    setUserProfile(prev => ({...prev, notificationToken: currentToken}));
+                    alert('Notifications enabled successfully!');
+                } else {
+                    console.log('No registration token available. Request permission to generate one.');
+                    alert('Could not get notification token. Please try again.');
+                }
+            } else {
+                console.log('Unable to get permission to notify.');
+                alert('Notification permission was denied.');
             }
         } catch (error) {
-            console.error('Error enabling notifications:', error);
+            console.error('An error occurred while retrieving token. ', error);
             alert(`Failed to enable notifications: ${error.message}`);
         } finally {
             setIsEnablingNotifications(false);
