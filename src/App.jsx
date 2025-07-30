@@ -1128,4 +1128,90 @@ const ProfileModalContent = ({ currentUser, userProfile, setUserProfile, db, app
         </div>
     );
 };
+
+return (
+    <div className="app-container">
+        <header>
+            <div className="header-main">
+                <h1>Poker Night Ledger</h1>
+                <p>Track chips, buy-ins, and payouts in real-time</p>
+            </div>
+            <div className="header-user-info">
+                <span>Logged in as <strong>{username}</strong> <span className="user-role">{userRole}</span></span>
+                <div className="header-actions">
+                    <Button onClick={() => openModal('profile')} variant="secondary" className="stats-btn"><UserIcon/></Button>
+                    {isAdmin && <Button onClick={() => setView('admin')} variant="secondary" className="stats-btn"><Crown/></Button>}
+                    <Button onClick={() => setView('stats')} variant="secondary" className="stats-btn"><BarChart2 className="icon"/></Button>
+                    <Button onClick={() => setView('blinds')} variant="secondary" className="stats-btn" disabled={!sessionActive}><Timer/></Button>
+                    <Button onClick={() => openModal('settings')} variant="secondary" className="settings-btn"><Settings/></Button>
+                    <Button onClick={() => signOut(auth)} variant="danger" className="logout-btn"><LogOut/></Button>
+                </div>
+            </div>
+        </header>
+        
+        <main>
+            {view === 'admin' ? (
+                renderAdminPanel()
+            ) : view === 'blinds' ? (
+                renderBlindsTimer()
+            ) : view === 'stats' ? (
+                <StatsView />
+            ) : view === 'final-counts-admin' ? (
+                renderFinalCountsAdmin()
+            ) : view === 'final-counts-player' ? (
+                renderFinalCountsPlayer()
+            ) : !sessionActive ? (
+                renderSessionManager()
+            ) : finalCalculations ? (
+                renderSummary()
+            ) : (
+                <>
+                    {isLoadingSession ? <p className="loading-text">Loading Session...</p> : 
+                    <>
+                        <div className="main-grid">
+                            {renderSessionManager()}
+                            {(isAdmin || isGameMaker) && renderAddPlayerForm()}
+                            {!hasJoined && renderJoinLobby()}
+                            {players.length > 0 ? renderPlayerList() : (
+                              !isAdmin && !isGameMaker && <Card><p className="text-center">Lobby is empty. Join the game or ask a Game Maker to add guests.</p></Card>
+                            )}
+                        </div>
+                    </>
+                    }
+                </>
+            )}
+        </main>
+        
+        {showConsole && <ConsoleLog />}
+        
+        <Modal 
+            isOpen={modal.isOpen} 
+            onClose={closeModal} 
+            title={
+                modal.type === 'buy-in' ? 'Buy Chips' :
+                modal.type === 'self-buy-in' ? 'Join Game & Buy-in' :
+                modal.type === 'cash-out' ? 'Cash Out' :
+                modal.type === 'end-game' ? 'End Game' :
+                modal.type === 'error' ? 'Error' :
+                modal.type === 'settings' ? 'Settings' :
+                modal.type === 'profile' ? 'User Profile' :
+                modal.type === 'edit-player' ? 'Edit Player' :
+                modal.type === 'show-qr' ? 'PromptPay QR Code' :
+                modal.type === 'no-qr' ? 'No PromptPay ID' :
+                'Modal'
+            }
+        >
+            {modal.type === 'buy-in' && <BuyInModalContent />}
+            {modal.type === 'self-buy-in' && <SelfBuyInModalContent />}
+            {modal.type === 'cash-out' && <CashOutModalContent />}
+            {modal.type === 'end-game' && <EndGameModalContent />}
+            {modal.type === 'error' && <ErrorModalContent />}
+            {modal.type === 'settings' && <SettingsModalContent />}
+            {modal.type === 'profile' && <ProfileModalContent currentUser={currentUser} userProfile={userProfile} setUserProfile={setUserProfile} db={db} appId={appId} closeModal={closeModal} />}
+            {modal.type === 'edit-player' && <EditPlayerModalContent />}
+            {modal.type === 'show-qr' && <QrCodeModalContent />}
+            {modal.type === 'no-qr' && <NoQrCodeModalContent />}
+        </Modal>
+    </div>
+);
 }
