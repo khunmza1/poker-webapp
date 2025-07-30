@@ -606,8 +606,8 @@ function MainApp({ currentUser, userProfile, setUserProfile, auth, db, isAdmin, 
             return;
         }
         try {
-            // Using a unique ID for each task to allow multiple requests
-            const taskRef = doc(collection(db, `artifacts/${appId}/private/tasks`));
+            // FIX: Corrected the path to have an odd number of segments
+            const taskRef = doc(collection(db, `artifacts/${appId}/tasks`));
             await setDoc(taskRef, {
                 type: 'sendTestNotification',
                 requestedBy: currentUser.uid,
