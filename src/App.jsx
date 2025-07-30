@@ -1,10 +1,11 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { Plus, ArrowRight, X, Users, DollarSign, Calculator, Eraser, AlertTriangle, Settings, ChevronDown, ChevronUp, BookOpen, LogIn, PlusCircle, ArrowLeft, Bot, QrCode, Timer, Play, Pause, RefreshCw, SkipForward, SkipBack, Star, LogOut, Crown, User as UserIcon, Bell, BarChart2 } from 'lucide-react';
+import { Plus, ArrowRight, X, Users, DollarSign, Calculator, Eraser, AlertTriangle, Settings, ChevronDown, ChevronUp, BookOpen, LogIn, PlusCircle, ArrowLeft, Bot, QrCode, Timer, Play, Pause, RefreshCw, SkipForward, SkipBack, Star, LogOut, Crown, User as UserIcon, Bell, BarChart2, Send } from 'lucide-react';
 import { initializeApp } from "firebase/app";
-import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, onAuthStateChanged, signOut, getMessaging, getToken } from "firebase/auth";
+import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "firebase/auth";
 import { getFirestore, doc, setDoc, onSnapshot, getDoc, collection, query, where, getDocs, updateDoc, serverTimestamp } from "firebase/firestore";
 
 // --- Firebase Configuration ---
+// This should be populated by your environment variables (e.g., Vite)
 const firebaseConfig = {
     apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
     authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
@@ -95,6 +96,7 @@ function AuthModal({ isOpen, onClose, auth, initialMode }) {
     );
 }
 
+
 // --- Main App Component ---
 export default function App() {
   const [auth, setAuth] = useState(null);
@@ -105,7 +107,6 @@ export default function App() {
   const [isGameMaker, setIsGameMaker] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [authModal, setAuthModal] = useState({ isOpen: false, mode: 'login' });
-  
   const appId = typeof __app_id !== 'undefined' ? __app_id : 'poker-ledger-default';
 
   useEffect(() => {
@@ -160,29 +161,13 @@ export default function App() {
   const openAuthModal = (mode) => setAuthModal({ isOpen: true, mode });
   const closeAuthModal = () => setAuthModal({ isOpen: false, mode: 'login' });
 
-  if (isLoading) {
-    return <div className="loading-fullscreen">Loading...</div>;
-  }
-
-  if (!currentUser) {
-    return (
-        <>
-            <WelcomePage onLogin={() => openAuthModal('login')} onRegister={() => openAuthModal('register')} />
-            <AuthModal 
-                isOpen={authModal.isOpen} 
-                onClose={closeAuthModal} 
-                auth={auth} 
-                initialMode={authModal.mode}
-            />
-        </>
-    );
-  }
-
+  if (isLoading) return <div className="loading-fullscreen">Loading...</div>;
+  if (!currentUser) return <><WelcomePage onLogin={() => openAuthModal('login')} onRegister={() => openAuthModal('register')} /><AuthModal isOpen={authModal.isOpen} onClose={closeAuthModal} auth={auth} initialMode={authModal.mode} /></>;
   return <MainApp currentUser={currentUser} userProfile={userProfile} setUserProfile={setUserProfile} auth={auth} db={db} isAdmin={isAdmin} isGameMaker={isGameMaker} appId={appId} />;
 }
 
-// --- Stats Component (FIXED: Moved outside MainApp) ---
-const StatsView = ({ db, appId, setView, formatMoney }) => {
+// --- Independent Components ---
+const StatsView = ({ db, appId, setView, currencySymbol }) => {
     const [statsData, setStatsData] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
 
@@ -201,26 +186,13 @@ const StatsView = ({ db, appId, setView, formatMoney }) => {
                     if (session.finalCalculations?.players) {
                         session.finalCalculations.players.forEach(player => {
                             if (!playerStats[player.name]) {
-                                playerStats[player.name] = {
-                                    name: player.name,
-                                    totalGames: 0,
-                                    totalProfit: 0,
-                                    wins: 0,
-                                    losses: 0,
-                                    chipValue: session.chipValue || 0.5 // Use session-specific chip value
-                                };
+                                playerStats[player.name] = { name: player.name, totalGames: 0, totalProfit: 0, wins: 0, losses: 0 };
                             }
-                            
                             playerStats[player.name].totalGames++;
-                            // Important: Calculate profit in currency, not chips
                             const profitInCurrency = player.balance * (session.chipValue || 0.5);
                             playerStats[player.name].totalProfit += profitInCurrency;
-                            
-                            if (player.balance > 0) {
-                                playerStats[player.name].wins++;
-                            } else if (player.balance < 0) {
-                                playerStats[player.name].losses++;
-                            }
+                            if (player.balance > 0) playerStats[player.name].wins++;
+                            else if (player.balance < 0) playerStats[player.name].losses++;
                         });
                     }
                 });
@@ -233,26 +205,22 @@ const StatsView = ({ db, appId, setView, formatMoney }) => {
                 setIsLoading(false);
             }
         };
-        
         fetchStats();
     }, [db, appId]);
 
-    if (isLoading) {
-        return <div className="loading-fullscreen">Loading Stats...</div>;
-    }
+    if (isLoading) return <div className="loading-fullscreen">Loading Stats...</div>;
 
     return (
         <Card>
             <h2 className="section-title"><BarChart2 className="icon"/> Player Statistics</h2>
-            <Button onClick={() => setView('game')} variant="secondary" className="back-btn">
-                <ArrowLeft className="icon"/> Back to Game
-            </Button>
+            <Button onClick={() => setView('game')} variant="secondary" className="back-btn"><ArrowLeft className="icon"/> Back to Game</Button>
             <div className="stats-list">
-                {statsData.map(player => (
+                {statsData.length === 0 ? <p className="text-center" style={{padding: '1rem'}}>No completed games found.</p> :
+                 statsData.map(player => (
                     <div key={player.name} className="stats-item">
                         <div className="stats-player-name">{player.name}</div>
                         <div className="stats-player-profit" style={{ color: player.totalProfit >= 0 ? 'var(--green)' : 'var(--red)' }}>
-                            {player.totalProfit >= 0 ? '+' : '-'}${Math.abs(player.totalProfit).toFixed(2)}
+                            {player.totalProfit >= 0 ? '+' : ''}{currencySymbol}{player.totalProfit.toFixed(2)}
                         </div>
                         <div className="stats-player-details">
                            Games: {player.totalGames} | Wins: {player.wins} | Losses: {player.losses}
@@ -264,6 +232,62 @@ const StatsView = ({ db, appId, setView, formatMoney }) => {
     );
 };
 
+const FinalCountsView = ({ sessionData, players, currentUser, isAdmin, isGameMaker, db, appId, sessionId, handleEndGameCalculation }) => {
+    const finalChipCounts = sessionData.finalChipCounts || {};
+
+    const handleCountChange = async (playerId, value) => {
+        const newCounts = {
+            ...finalChipCounts,
+            [playerId]: value === '' ? null : parseInt(value, 10)
+        };
+        const sessionRef = doc(db, `artifacts/${appId}/public/data/poker-sessions`, sessionId);
+        await updateDoc(sessionRef, { finalChipCounts: newCounts });
+    };
+
+    const totalChipsEntered = Object.values(finalChipCounts).reduce((sum, count) => sum + (count || 0), 0);
+    const totalNetBuyIn = players.reduce((sum, p) => sum + p.buyIn, 0);
+
+    return (
+        <Card>
+            <h2 className="section-title"><Calculator className="icon"/> Enter Final Chip Counts</h2>
+            <p className="text-center text-sm">All players should enter their final count. The Game Maker will verify and finalize the results.</p>
+            <div className="final-counts-list" style={{margin: '1rem 0'}}>
+                {players.map(player => {
+                    const isCurrentUserPlayer = player.uid === currentUser.uid;
+                    const canEdit = isAdmin || isGameMaker || isCurrentUserPlayer;
+                    return (
+                        <div key={player.id} className="final-counts-item">
+                            <label htmlFor={`player-${player.id}`}>{player.name}</label>
+                            <input
+                                id={`player-${player.id}`}
+                                type="number"
+                                inputMode="numeric"
+                                pattern="[0-9]*"
+                                value={finalChipCounts[player.id] == null ? '' : finalChipCounts[player.id]}
+                                placeholder="Enter count"
+                                onChange={(e) => handleCountChange(player.id, e.target.value)}
+                                disabled={!canEdit}
+                                className={!canEdit ? 'disabled-input' : ''}
+                            />
+                        </div>
+                    )
+                })}
+            </div>
+            <div className="game-summary-footer">
+                <h3>Total Chips Entered: <span style={{color: totalChipsEntered !== totalNetBuyIn ? 'var(--red)' : 'var(--green)'}}>{totalChipsEntered} / {totalNetBuyIn}</span></h3>
+                {(isAdmin || isGameMaker) && (
+                    <Button 
+                        onClick={() => handleEndGameCalculation(finalChipCounts)} 
+                        variant="danger"
+                        disabled={totalChipsEntered !== totalNetBuyIn}
+                    >
+                        Calculate Final Results
+                    </Button>
+                )}
+            </div>
+        </Card>
+    );
+};
 
 // --- Main Application Logic (after login) ---
 function MainApp({ currentUser, userProfile, setUserProfile, auth, db, isAdmin, isGameMaker, appId }) {
@@ -277,11 +301,9 @@ function MainApp({ currentUser, userProfile, setUserProfile, auth, db, isAdmin, 
     const [discordWebhookUrl, setDiscordWebhookUrl] = useState('');
     const [expandedPlayerId, setExpandedPlayerId] = useState(null);
     const [expandedSummaryPlayerId, setExpandedSummaryPlayerId] = useState(null);
-    const [showConsole, setShowConsole] = useState(false);
     const [userIp, setUserIp] = useState('unknown');
-    const [quickAddPlayers, setQuickAddPlayers] = useState(['test1', 'test2']);
+    const [quickAddPlayers, setQuickAddPlayers] = useState([]);
     
-    // Session State
     const [sessionId, setSessionId] = useState('');
     const [sessionData, setSessionData] = useState(null);
     const [availableSessions, setAvailableSessions] = useState([]);
@@ -292,6 +314,7 @@ function MainApp({ currentUser, userProfile, setUserProfile, auth, db, isAdmin, 
     const currencySymbol = '฿';
     const username = useMemo(() => userProfile?.displayName || (currentUser.email || 'user').split('@')[0], [currentUser.email, userProfile]);
     const userRole = useMemo(() => isAdmin ? '(Admin)' : isGameMaker ? '(Game Maker)' : '(Player)', [isAdmin, isGameMaker]);
+    const hasJoined = useMemo(() => players.some(p => p.uid === currentUser.uid), [players, currentUser.uid]);
 
     const getDeviceId = () => {
         let deviceId = localStorage.getItem('pokerLedgerDeviceId');
@@ -378,12 +401,11 @@ function MainApp({ currentUser, userProfile, setUserProfile, auth, db, isAdmin, 
             transactionLog: [{ id: Date.now(), timestamp: new Date().toISOString(), type: 'New Game', message: `Session ${newSessionId} started.`, ip: userIp }],
             chipValue: 0.5,
             finalCalculations: null,
+            finalChipCounts: {}, // NEW: Initialize this field
             gameState: 'in_progress',
             datePrefix: newSessionId.split('-')[0],
-            blinds: [
-                { sb: 5, bb: 10 }, { sb: 10, bb: 20 }, { sb: 15, bb: 30 }, { sb: 20, bb: 40 }, { sb: 25, bb: 50 }, { sb: 30, bb: 60 }
-            ],
-            timerDuration: 480, // 8 minutes
+            blinds: [ { sb: 5, bb: 10 }, { sb: 10, bb: 20 }, { sb: 15, bb: 30 }, { sb: 20, bb: 40 }, { sb: 25, bb: 50 }, { sb: 30, bb: 60 } ],
+            timerDuration: 480,
         };
         const sessionRef = doc(db, `artifacts/${appId}/public/data/poker-sessions`, newSessionId);
         await setDoc(sessionRef, initialState);
@@ -392,7 +414,7 @@ function MainApp({ currentUser, userProfile, setUserProfile, auth, db, isAdmin, 
         listenToSession(newSessionId);
         setSessionActive(true);
         setIsLoadingSession(false);
-        setView('game'); // Ensure view is reset to game
+        setView('game');
     };
     
     const loadSession = async (sid) => {
@@ -405,7 +427,7 @@ function MainApp({ currentUser, userProfile, setUserProfile, auth, db, isAdmin, 
           listenToSession(sid);
           setSessionId(sid);
           setSessionActive(true);
-          setView('game'); // Ensure view is reset to game
+          setView('game');
         } else {
           alert("Session not found!");
           setSessionId('');
@@ -433,12 +455,35 @@ function MainApp({ currentUser, userProfile, setUserProfile, auth, db, isAdmin, 
           setTransactionLog(data.transactionLog || []);
           setChipValue(data.chipValue || 0.5);
           setFinalCalculations(data.finalCalculations || null);
+          
+          if (data.gameState === 'awaiting_counts') {
+              setView('final-counts');
+          } else if (data.gameState === 'finished' && data.finalCalculations) {
+              setView('game'); // Let the main router show the summary
+          } else if (view === 'final-counts' && data.gameState === 'in_progress') {
+              setView('game');
+          }
         }
       });
     };
-    
+
+    useEffect(() => {
+        if (!sessionActive || isLoadingSession) return;
+        const handler = setTimeout(() => {
+            if (db && sessionId && sessionData) {
+                const sessionRef = doc(db, `artifacts/${appId}/public/data/poker-sessions`, sessionId);
+                const dataToSave = { 
+                    players: players, 
+                    transactionLog: transactionLog, 
+                };
+                updateDoc(sessionRef, dataToSave).catch(err => console.error("Error debounced saving session:", err));
+            }
+        }, 2000);
+        return () => { clearTimeout(handler); };
+    }, [players, transactionLog, sessionActive, db, sessionId, appId, isLoadingSession, sessionData]);
+
     const formatMoney = (amountInChips) => { const value = amountInChips * chipValue; return `${currencySymbol}${value.toFixed(2)}`; };
-    const logTransaction = (log) => { const newLog = { id: Date.now(), timestamp: new Date().toISOString(), ip: userIp, ...log }; setTransactionLog(prevLogs => [...prevLogs, newLog]); sendToDiscord(newLog); };
+    const logTransaction = (log) => { const newLog = { id: Date.now(), timestamp: new Date().toISOString(), ip: userIp, ...log }; setTransactionLog(prevLogs => [...prevLogs, newLog]); };
     
     const addPlayer = async (name, buyIn = 0, isGuest = true) => {
         const trimmedName = name.trim();
@@ -479,7 +524,7 @@ function MainApp({ currentUser, userProfile, setUserProfile, auth, db, isAdmin, 
     const handleUpdatePlayer = async (playerId, data) => { 
         const player = players.find(p => p.id === playerId);
         if (!player) return;
-        if (db && data.promptpayId) {
+        if (db && data.promptpayId !== undefined) {
             const playerRef = doc(db, `artifacts/${appId}/public/data/poker_players`, player.name);
             await setDoc(playerRef, { promptpayId: data.promptpayId, name: player.name }, { merge: true });
         }
@@ -495,15 +540,10 @@ function MainApp({ currentUser, userProfile, setUserProfile, auth, db, isAdmin, 
         await setDoc(playerRef, { name: playerName, isQuickAdd: !isCurrentlyQuickAdd }, { merge: true });
     };
     
-    // FIXED: Simplified handleBuyIn to only use Central Box
     const handleBuyIn = (buyerId, amount) => {
         const buyer = players.find(p => p.id === buyerId);
         if (!buyer) return;
-        
-        setPlayers(prevPlayers => prevPlayers.map(p =>
-            p.id === buyerId ? { ...p, buyIn: p.buyIn + amount } : p
-        ));
-        
+        setPlayers(prevPlayers => prevPlayers.map(p => p.id === buyerId ? { ...p, buyIn: p.buyIn + amount } : p ));
         logTransaction({ type: 'Player Buy-in', player: buyer.name, amount, source: 'Central Box' });
         closeModal();
     };
@@ -516,22 +556,14 @@ function MainApp({ currentUser, userProfile, setUserProfile, auth, db, isAdmin, 
     };
 
     const handleEndGameCalculation = (finalChipCounts) => {
-        const updatedPlayers = players.map(p => ({
-          ...p,
-          finalChips: parseInt(finalChipCounts[p.id] || 0, 10)
-        }));
-        
-        const playersWithBalance = updatedPlayers.map(p => ({
-            ...p,
-            balance: p.finalChips - p.buyIn,
-        }));
+        const updatedPlayers = players.map(p => ({ ...p, finalChips: parseInt(finalChipCounts[p.id] || 0, 10) }));
+        const playersWithBalance = updatedPlayers.map(p => ({ ...p, balance: p.finalChips - p.buyIn }));
         
         const totalFinalChips = playersWithBalance.reduce((sum, p) => sum + p.finalChips, 0);
         const totalNetBuyIn = playersWithBalance.reduce((sum, p) => sum + p.buyIn, 0);
         
         if (Math.abs(totalFinalChips - totalNetBuyIn) > 0.01) {
-            const errorMessage = `Balance mismatch! Total final chips (${totalFinalChips}) do not equal total net buy-ins (${totalNetBuyIn}). Please double-check chip counts.`;
-            openModal('error', { message: errorMessage });
+            openModal('error', { message: `Balance mismatch! Total final chips (${totalFinalChips}) do not equal total net buy-ins (${totalNetBuyIn}).` });
             return;
         }
         
@@ -554,21 +586,39 @@ function MainApp({ currentUser, userProfile, setUserProfile, auth, db, isAdmin, 
           if (Math.abs(creditor.balance) < 0.01) j++;
         }
         const finalData = { players: playersWithBalance.sort((a,b) => b.balance - a.balance), transactions };
-        setFinalCalculations(finalData);
-        setPlayers(updatedPlayers);
-        logTransaction({ type: 'Game End Summary', summary: finalData });
         
         const sessionRef = doc(db, `artifacts/${appId}/public/data/poker-sessions`, sessionId);
         updateDoc(sessionRef, { gameState: 'finished', finalCalculations: finalData, players: updatedPlayers });
-        closeModal();
+        logTransaction({ type: 'Game End Summary', summary: finalData });
+        setView('game'); // Switch back to the main view router, which will show the summary
     };
     
     const handleBackToGame = () => { 
         logTransaction({ type: 'Game Resumed', message: 'Returned to game from summary.' }); 
-        setFinalCalculations(null); 
-        setExpandedSummaryPlayerId(null);
         const sessionRef = doc(db, `artifacts/${appId}/public/data/poker-sessions`, sessionId);
-        updateDoc(sessionRef, { gameState: 'in_progress', finalCalculations: null });
+        updateDoc(sessionRef, { gameState: 'in_progress', finalCalculations: null, finalChipCounts: {} });
+        setView('game');
+    };
+
+    const handleSendTestNotification = async () => {
+        if (!isAdmin) {
+            alert("You don't have permission to do this.");
+            return;
+        }
+        try {
+            // Using a unique ID for each task to allow multiple requests
+            const taskRef = doc(collection(db, `artifacts/${appId}/private/tasks`));
+            await setDoc(taskRef, {
+                type: 'sendTestNotification',
+                requestedBy: currentUser.uid,
+                displayName: userProfile.displayName,
+                timestamp: serverTimestamp()
+            });
+            alert("Request sent! A test notification will be sent to all subscribed users via your Cloud Function.");
+        } catch (error) {
+            console.error("Error requesting test notification:", error);
+            alert("Failed to send request. See console for details.");
+        }
     };
 
     const resetGame = () => { startNewSession() };
@@ -577,44 +627,21 @@ function MainApp({ currentUser, userProfile, setUserProfile, auth, db, isAdmin, 
     const togglePlayerExpansion = (playerId) => { setExpandedPlayerId(prevId => (prevId === playerId ? null : playerId)); };
     const toggleSummaryExpansion = (playerId) => { setExpandedSummaryPlayerId(prevId => (prevId === playerId ? null : playerId)); };
     const totalBuyInFromBox = useMemo(() => players.reduce((sum, p) => sum + p.buyIn, 0), [players]);
-    const hasJoined = useMemo(() => players.some(p => p.uid === currentUser.uid), [players, currentUser.uid]);
-
-    // FIXED: This useEffect now properly handles view changes for all users
-    useEffect(() => {
-        if (sessionActive && sessionData?.gameState === 'awaiting_counts') {
-            if (isAdmin || isGameMaker) {
-                // Game Makers get the modal to input counts.
-                openModal('end-game');
-            } else {
-                // Players are shown a waiting screen.
-                setView('waiting-for-counts');
-            }
-        } else if (sessionData?.gameState !== 'finished' && view !== 'game' && view !== 'blinds' && view !== 'stats' && view !== 'admin') {
-            // Return to the main game view if the state is no longer 'awaiting_counts' or 'finished'
-            setView('game');
-        }
-    }, [sessionActive, sessionData?.gameState, isAdmin, isGameMaker]);
 
     // --- Render Functions ---
-    const renderAdminPanel = () => {
-        return (
-            <Card>
-                <h2 className="section-title"><Crown className="icon"/> Admin Panel</h2>
-                <Button onClick={() => setView('game')} variant="secondary" className="back-btn">
-                    <ArrowLeft className="icon"/> Back to Game
-                </Button>
-                
-                <div className="form-group-stack">
-                    <h3>Manage Game Makers</h3>
-                    {/* Game maker management UI would go here */}
-                    <p>Feature coming soon.</p>
-                </div>
-            </Card>
-        );
-    };
+    const renderAdminPanel = () => (
+        <Card>
+            <h2 className="section-title"><Crown className="icon"/> Admin Panel</h2>
+            <Button onClick={() => setView('game')} variant="secondary" className="back-btn"><ArrowLeft className="icon"/> Back to Game</Button>
+            <div className="form-group-stack" style={{marginTop: '1rem'}}>
+                <h3>Push Notifications</h3>
+                <p className="text-sm">This will trigger your backend Cloud Function to send a test push notification to all users who have subscribed.</p>
+                <Button onClick={handleSendTestNotification} variant="primary"><Send className="icon"/> Send Test Notification</Button>
+            </div>
+        </Card>
+    );
     
     const renderBlindsTimer = () => {
-        // ... (This component's code remains unchanged but is included for completeness)
         const [currentLevel, setCurrentLevel] = useState(0);
         const [timeLeft, setTimeLeft] = useState(sessionData?.timerDuration || 480);
         const [isRunning, setIsRunning] = useState(false);
@@ -706,86 +733,44 @@ function MainApp({ currentUser, userProfile, setUserProfile, auth, db, isAdmin, 
             </Card>
         );
     };
-
-    // NEW: Component for players while admin enters counts
-    const renderWaitingForCounts = () => (
+    const renderSessionManager = () => ( <Card> <h2 className="section-title">Session Management</h2> <div className="session-manager-grid"> <div className="form-group"> <label htmlFor="sessionSelect">Recent Sessions (Last 30 Days)</label> <select id="sessionSelect" value={sessionId} onChange={handleSessionSelect}> <option value="">-- Select a Session --</option> {availableSessions.map(sid => <option key={sid} value={sid}>{sid}</option>)} </select> </div> {(isAdmin || isGameMaker) && <Button onClick={startNewSession} variant="primary" disabled={isLoadingSession}><PlusCircle className="icon"/> New Session</Button>} </div> {sessionActive && <p className="session-active-text">Live Session: <strong>{sessionId}</strong></p>} </Card> );
+    const renderJoinLobby = () => (
         <Card>
-            <h2 className="section-title">Awaiting Final Counts</h2>
-            <div className="text-center" style={{padding: '2rem'}}>
-                <p>The Game Maker is entering the final chip counts.</p>
-                <p>The results will appear here shortly.</p>
-            </div>
+            <h2 className="section-title">Join Game Lobby</h2>
+            {players.find(p => p.status === 'guest' && p.name.toLowerCase() === username.toLowerCase()) ? (
+                <div className="join-game-actions">
+                    <p>A guest named <strong>{username}</strong> is in the lobby. Is this you?</p>
+                    <Button onClick={() => openModal('self-buy-in', { player: players.find(p => p.name.toLowerCase() === username.toLowerCase()) })} variant="success">Yes, Join & Buy-in</Button>
+                </div>
+            ) : (
+                <div className="join-game-actions">
+                    <p>You are not in the game yet.</p>
+                    <Button onClick={() => openModal('self-buy-in', { name: username, isNewPlayer: true })} variant="success">Join Game as {username}</Button>
+                </div>
+            )}
         </Card>
     );
+    const renderAddPlayerForm = () => ( <Card> <h2 className="section-title"><Users className="icon"/>Add Guest Players</h2> <form className="add-player-form" onSubmit={(e) => handleAddPlayer(e, 400)}> <input type="text" value={newPlayerName} onChange={(e) => setNewPlayerName(e.target.value)} placeholder="Enter guest's name"/> <div className="button-group"> <Button onClick={(e) => handleAddPlayer(e, 0)} variant="secondary" disabled={!newPlayerName.trim()}>Add Guest</Button> <Button type="submit" variant="primary" disabled={!newPlayerName.trim()}>Add Guest & Buy-in 400</Button> </div> </form> <div className="quick-add-section"> <h3>Quick Add Guests</h3> <div className="quick-add-grid"> {quickAddPlayers.map(name => ( <Button key={name} onClick={() => handleQuickAdd(name)} variant="success" disabled={players.some(p => p.name === name)}> <Plus size={16} className="icon"/> {name} </Button> ))} </div> </div> </Card> );
+    const renderPlayerList = () => ( <Card> <h2 className="section-title">Lobby & Game</h2> <div className="player-list"> {players.map(player => ( <div key={player.id} className={`player-list-item ${player.uid === currentUser.uid ? 'is-current-user' : ''}`}> <div className="player-list-item-header"> <div className="player-name-group"> <button onClick={() => togglePlayerExpansion(player.id)} className="player-name-btn"> {player.name} {player.status === 'joined' ? <span className="status-dot joined"></span> : <span className="status-dot guest"></span>} {expandedPlayerId === player.id ? <ChevronUp className="icon-sm"/> : <ChevronDown className="icon-sm"/>} </button> {isAdmin && <Button onClick={() => toggleQuickAdd(player.name)} variant="secondary" className={`promptpay-btn ${quickAddPlayers.includes(player.name) ? 'is-quick-add' : ''}`}><Star size={14}/></Button>} <Button onClick={() => openModal('edit-player', player)} variant="secondary" className="promptpay-btn">PromptPay ID</Button> </div> <div className="player-info-group"> <span>Net Buy-in: <strong>{player.buyIn} chips</strong></span> <div className="button-group"> {player.status === 'guest' && !hasJoined && ( <Button onClick={() => openModal('self-buy-in', { player })} variant="success"> Join Game </Button> )} {((isAdmin || isGameMaker) || (player.uid === currentUser.uid && player.status === 'joined')) && ( <Button onClick={() => openModal('buy-in', player)} variant="primary">Buy Chips</Button> )} {(isAdmin || isGameMaker) && ( <Button onClick={() => openModal('cash-out', player)} variant="secondary" disabled={player.buyIn <= 0}>Cash Out</Button> )} </div> </div> </div> {expandedPlayerId === player.id && ( <div className="transaction-history-container"> <h4>Transaction History</h4> <ul> {transactionLog.filter(log => log.player === player.name || (log.source && log.source.includes(player.name))).map(log => { let logClass = ''; if (log.type.includes('Buy-in')) { logClass = log.source === 'Central Box' ? 'log-buy-box' : 'log-buy-player'; } else if (log.type === 'Cash Out') { logClass = 'log-cashout'; } return ( <li key={log.id} className={logClass}> <span>{new Date(log.timestamp).toLocaleTimeString()} - {log.type}</span> <span>{log.amount && `${log.amount} chips`} {log.source && `(${log.source})`}</span> </li> ); })} </ul> </div> )} </div> ))} </div> <div className="game-summary-footer"> <h3>Total in Play (from Box): <span className="text-green">{totalBuyInFromBox} chips</span></h3> {(isAdmin || isGameMaker) && <Button onClick={() => { const sessionRef = doc(db, `artifacts/${appId}/public/data/poker-sessions`, sessionId); updateDoc(sessionRef, { gameState: 'awaiting_counts' }); }} variant="danger" disabled={players.length < 2}> <Calculator className="icon"/> End Game </Button>} </div> </Card> );
+    const renderSummary = () => ( <Card className="summary-card"> <h2 className="summary-title">Game Over: Final Tally</h2> <p className="session-id-summary">Session ID: {sessionId}</p> <h3 className="section-title">Player Results</h3> <div className="player-results-list"> {finalCalculations.players.map(player => ( <div key={player.id} className="player-result-item"> <button onClick={() => toggleSummaryExpansion(player.id)} className="player-result-header"> <div> <span>{player.name}</span> <div className="player-result-details">Net Buy-in: {player.buyIn} chips | Final: {player.finalChips} chips</div> </div> <div className="player-result-balance-group"> <span className={player.balance >= 0 ? 'text-green' : 'text-red'}> {player.balance >= 0 ? `+ ${formatMoney(player.balance)}` : `- ${formatMoney(Math.abs(player.balance))}`} </span> {expandedSummaryPlayerId === player.id ? <ChevronUp className="icon-sm"/> : <ChevronDown className="icon-sm"/>} </div> </button> {expandedSummaryPlayerId === player.id && ( <div className="transaction-history-container"> <h4>Transaction History</h4> <ul> {transactionLog.filter(log => log.player === player.name || (log.source && log.source.includes(player.name))).map(log => { let logClass = ''; if (log.type.includes('Buy-in')) { logClass = log.source === 'Central Box' ? 'log-buy-box' : 'log-buy-player'; } else if (log.type === 'Cash Out') { logClass = 'log-cashout'; } return ( <li key={log.id} className={logClass}> <span>{new Date(log.timestamp).toLocaleTimeString()} - {log.type}</span> <span>{log.amount && `${log.amount} chips`} {log.source && `(${log.source})`}</span> </li> ); })} </ul> </div> )} </div> ))} </div> <h3 className="section-title">Settlement Transactions</h3> <div className="settlement-list"> {finalCalculations.transactions.map((t, index) => { const recipient = players.find(p => p.name === t.to); const hasPromptPay = recipient && recipient.promptpayId; const qrUrl = hasPromptPay ? `https://promptpay.io/${recipient.promptpayId}/${(t.amount * chipValue).toFixed(2)}` : ''; return ( <button key={index} onClick={() => { if(hasPromptPay) { openModal('show-qr', { url: qrUrl, from: t.from, to: t.to, amount: t.amount }) } else { openModal('no-qr', { from: t.from, to: t.to, amount: t.amount }) } }} className="settlement-item"> <span className="text-red">{t.from}</span> <ArrowRight className="icon-sm" /> <span className="text-green">{t.to}</span> <ArrowRight className="icon-sm" /> <span>{formatMoney(t.amount)}</span> </button> );})} </div> <div className="summary-actions"> <Button onClick={handleBackToGame} variant="secondary"> <ArrowLeft className="icon"/> Back to Game </Button> <Button onClick={resetGame} variant="primary"> <Eraser className="icon"/> Start New Session </Button> </div> </Card> );
     
-    const renderSessionManager = () => (
-        <Card>
-          <h2 className="section-title">Session Management</h2>
-          <div className="session-manager-grid">
-            <div className="form-group">
-              <label htmlFor="sessionSelect">Recent Sessions (Last 30 Days)</label>
-              <select id="sessionSelect" value={sessionId} onChange={handleSessionSelect}>
-                <option value="">-- Select a Session --</option>
-                {availableSessions.map(sid => <option key={sid} value={sid}>{sid}</option>)}
-              </select>
-            </div>
-            {(isAdmin || isGameMaker) && <Button onClick={startNewSession} variant="primary" disabled={isLoadingSession}><PlusCircle className="icon"/> New Session</Button>}
-          </div>
-            {sessionActive && <p className="session-active-text">Live Session: <strong>{sessionId}</strong></p>}
-        </Card>
-      );
-    
-      const renderJoinLobby = () => {
-        const playerAsGuest = players.find(p => p.status === 'guest' && p.name.toLowerCase() === username.toLowerCase());
-    
-        return (
-            <Card>
-                <h2 className="section-title">Join Game Lobby</h2>
-                {playerAsGuest ? (
-                    <div className="join-game-actions">
-                        <p>A guest named <strong>{username}</strong> is in the lobby. Is this you?</p>
-                        <Button onClick={() => openModal('self-buy-in', { player: playerAsGuest })} variant="success">Yes, Join & Buy-in</Button>
-                    </div>
-                ) : (
-                    <div className="join-game-actions">
-                        <p>You are not in the game yet.</p>
-                        <Button onClick={() => openModal('self-buy-in', { name: username, isNewPlayer: true })} variant="success">Join Game as {username}</Button>
-                    </div>
-                )}
-            </Card>
-        );
-      };
-    
-      const renderAddPlayerForm = () => ( <Card> <h2 className="section-title"><Users className="icon"/>Add Guest Players</h2> <form className="add-player-form" onSubmit={(e) => handleAddPlayer(e, 400)}> <input type="text" value={newPlayerName} onChange={(e) => setNewPlayerName(e.target.value)} placeholder="Enter guest's name"/> <div className="button-group"> <Button onClick={(e) => handleAddPlayer(e, 0)} variant="secondary" disabled={!newPlayerName.trim()}>Add Guest</Button> <Button type="submit" variant="primary" disabled={!newPlayerName.trim()}>Add Guest & Buy-in 400</Button> </div> </form> <div className="quick-add-section"> <h3>Quick Add Guests</h3> <div className="quick-add-grid"> {quickAddPlayers.map(name => ( <Button key={name} onClick={() => handleQuickAdd(name)} variant="success" disabled={players.some(p => p.name === name)}> <Plus size={16} className="icon"/> {name} </Button> ))} </div> </div> </Card> );
-      const renderPlayerList = () => ( <Card> <h2 className="section-title">Lobby & Game</h2> <div className="player-list"> {players.map(player => ( <div key={player.id} className={`player-list-item ${player.uid === currentUser.uid ? 'is-current-user' : ''}`}> <div className="player-list-item-header"> <div className="player-name-group"> <button onClick={() => togglePlayerExpansion(player.id)} className="player-name-btn"> {player.name} {player.status === 'joined' ? <span className="status-dot joined"></span> : <span className="status-dot guest"></span>} {expandedPlayerId === player.id ? <ChevronUp className="icon-sm"/> : <ChevronDown className="icon-sm"/>} </button> {isAdmin && <Button onClick={() => toggleQuickAdd(player.name)} variant="secondary" className={`promptpay-btn ${quickAddPlayers.includes(player.name) ? 'is-quick-add' : ''}`}><Star size={14}/></Button>} <Button onClick={() => openModal('edit-player', player)} variant="secondary" className="promptpay-btn">PromptPay ID</Button> </div> <div className="player-info-group"> <span>Net Buy-in: <strong>{player.buyIn} chips</strong></span> <div className="button-group"> {player.status === 'guest' && !hasJoined && ( <Button onClick={() => openModal('self-buy-in', { player })} variant="success"> Join Game </Button> )} {((isAdmin || isGameMaker) || (player.uid === currentUser.uid && player.status === 'joined')) && ( <Button onClick={() => openModal('buy-in', player)} variant="primary">Buy Chips</Button> )} {(isAdmin || isGameMaker) && ( <Button onClick={() => openModal('cash-out', player)} variant="secondary" disabled={player.buyIn <= 0}>Cash Out</Button> )} </div> </div> </div> {expandedPlayerId === player.id && ( <div className="transaction-history-container"> <h4>Transaction History</h4> <ul> {transactionLog.filter(log => log.player === player.name || (log.source && log.source.includes(player.name))).map(log => { if (log.source && log.source.includes(player.name)) { return ( <li key={log.id} className="log-sold"> <span>{new Date(log.timestamp).toLocaleTimeString()} - Sold Chips</span> <span>{log.amount && `${log.amount} chips`} (to {log.player})</span> </li> ); } let logClass = ''; if (log.type.includes('Buy-in')) { logClass = log.source === 'Central Box' ? 'log-buy-box' : 'log-buy-player'; } else if (log.type === 'Cash Out') { logClass = 'log-cashout'; } return ( <li key={log.id} className={logClass}> <span>{new Date(log.timestamp).toLocaleTimeString()} - {log.type}</span> <span>{log.amount && `${log.amount} chips`} {log.source && `(${log.source})`}</span> </li> ); })} </ul> </div> )} </div> ))} </div> <div className="game-summary-footer"> <h3>Total in Play (from Box): <span className="text-green">{totalBuyInFromBox} chips</span></h3> {(isAdmin || isGameMaker) && <Button onClick={() => { const sessionRef = doc(db, `artifacts/${appId}/public/data/poker-sessions`, sessionId); updateDoc(sessionRef, { gameState: 'awaiting_counts' }); }} variant="danger" disabled={players.length < 2}> <Calculator className="icon"/> End Game </Button>} </div> </Card> );
-      const renderSummary = () => ( <Card className="summary-card"> <h2 className="summary-title">Game Over: Final Tally</h2> <p className="session-id-summary">Session ID: {sessionId}</p> <h3 className="section-title">Player Results</h3> <div className="player-results-list"> {finalCalculations.players.map(player => ( <div key={player.id} className="player-result-item"> <button onClick={() => toggleSummaryExpansion(player.id)} className="player-result-header"> <div> <span>{player.name}</span> <div className="player-result-details">Net Buy-in: {player.buyIn} chips | Final: {player.finalChips} chips</div> </div> <div className="player-result-balance-group"> <span className={player.balance >= 0 ? 'text-green' : 'text-red'}> {player.balance >= 0 ? `+ ${formatMoney(player.balance)}` : `- ${formatMoney(Math.abs(player.balance))}`} </span> {expandedSummaryPlayerId === player.id ? <ChevronUp className="icon-sm"/> : <ChevronDown className="icon-sm"/>} </div> </button> {expandedSummaryPlayerId === player.id && ( <div className="transaction-history-container"> <h4>Transaction History</h4> <ul> {transactionLog.filter(log => log.player === player.name || (log.source && log.source.includes(player.name))).map(log => { if (log.source && log.source.includes(player.name)) { return ( <li key={log.id} className="log-sold"> <span>{new Date(log.timestamp).toLocaleTimeString()} - Sold Chips</span> <span>{log.amount && `${log.amount} chips`} (to {log.player})</span> </li> ); } let logClass = ''; if (log.type.includes('Buy-in')) { logClass = log.source === 'Central Box' ? 'log-buy-box' : 'log-buy-player'; } else if (log.type === 'Cash Out') { logClass = 'log-cashout'; } return ( <li key={log.id} className={logClass}> <span>{new Date(log.timestamp).toLocaleTimeString()} - {log.type}</span> <span>{log.amount && `${log.amount} chips`} {log.source && `(${log.source})`}</span> </li> ); })} </ul> </div> )} </div> ))} </div> <h3 className="section-title">Settlement Transactions</h3> <div className="settlement-list"> {finalCalculations.transactions.map((t, index) => { const recipient = players.find(p => p.name === t.to); const hasPromptPay = recipient && recipient.promptpayId; const qrUrl = hasPromptPay ? `https://promptpay.io/${recipient.promptpayId}/${(t.amount * chipValue).toFixed(2)}` : ''; return ( <button key={index} onClick={() => { if(hasPromptPay) { openModal('show-qr', { url: qrUrl, from: t.from, to: t.to, amount: t.amount }) } else { openModal('no-qr', { from: t.from, to: t.to, amount: t.amount }) } }} className="settlement-item"> <span className="text-red">{t.from}</span> <ArrowRight className="icon-sm" /> <span className="text-green">{t.to}</span> <ArrowRight className="icon-sm" /> <span>{formatMoney(t.amount)}</span> </button> );})} </div> <div className="summary-actions"> <Button onClick={handleBackToGame} variant="secondary"> <ArrowLeft className="icon"/> Back to Game </Button> <Button onClick={resetGame} variant="primary"> <Eraser className="icon"/> Start New Session </Button> </div> </Card> );
-      const BuyInModalContent = () => {
+    // --- MODAL CONTENT ---
+    const BuyInModalContent = () => {
         const [amount, setAmount] = useState('400');
         const player = modal.data;
         return (
           <div className="form-group-stack">
             <p>How many chips is <strong>{player.name}</strong> buying?</p>
-            <input
-              type="number"
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-              placeholder="0"
-              min="1"
-              step="1"
-            />
+            <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0" min="1" step="1" />
             <p>Buy from:</p>
-            {/* FIXED: Removed inter-player buying option */}
             <select value="central-box" readOnly disabled>
               <option value="central-box">Central Box</option>
             </select>
             <Button onClick={() => handleBuyIn(player.id, parseInt(amount || 0))} variant="success" disabled={!amount || parseInt(amount) <= 0}> Confirm Buy-in </Button>
           </div>
         );
-      };
-
-      // All other modal content functions (SelfBuyIn, CashOut, EndGame, etc.) remain unchanged
-      // ...
-       const SelfBuyInModalContent = () => {
+    };
+    const SelfBuyInModalContent = () => {
         const [amount, setAmount] = useState('400');
         const { player, isNewPlayer, name } = modal.data;
         const playerName = isNewPlayer ? name : player.name;
@@ -793,14 +778,7 @@ function MainApp({ currentUser, userProfile, setUserProfile, auth, db, isAdmin, 
         return (
           <div className="form-group-stack">
             <p>Enter your initial buy-in amount for <strong>{playerName}</strong>.</p>
-            <input
-              type="number"
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-              placeholder="0"
-              min="1"
-              step="1"
-            />
+            <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0" min="1" step="1" />
             <Button onClick={() => {
                 if (isNewPlayer) {
                     handleSelfJoin(parseInt(amount || 0));
@@ -810,50 +788,71 @@ function MainApp({ currentUser, userProfile, setUserProfile, auth, db, isAdmin, 
             }} variant="success" disabled={!amount || parseInt(amount) <= 0}>Join & Buy-in</Button>
           </div>
         );
-      };
-      const CashOutModalContent = () => { const [amount, setAmount] = useState(''); const player = modal.data; return ( <div className="form-group-stack"> <p>How many chips is <strong>{player.name}</strong> cashing out?</p> <p className="text-sm">Chips are returned to the box. Max cash out is {player.buyIn} chips.</p> <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0" max={player.buyIn} min="1" step="1"/> <Button onClick={() => handleCashOut(player.id, parseInt(amount || 0))} variant="danger" disabled={!amount || parseInt(amount) <= 0 || parseInt(amount) > player.buyIn}> Confirm Cash Out </Button> </div> ); };
-      const EndGameModalContent = () => {
-        const [localCounts, setLocalCounts] = useState(() =>
-            players.reduce((acc, p) => ({ ...acc, [p.id]: p.finalChips > 0 ? p.finalChips : '' }), {})
-        );
+    };
+    const CashOutModalContent = () => {
+        const [amount, setAmount] = useState('');
+        const player = modal.data;
+        return ( <div className="form-group-stack"> <p>How many chips is <strong>{player.name}</strong> cashing out?</p> <p className="text-sm">Chips are returned to the box. Max cash out is {player.buyIn} chips.</p> <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0" max={player.buyIn} min="1" step="1"/> <Button onClick={() => handleCashOut(player.id, parseInt(amount || 0))} variant="danger" disabled={!amount || parseInt(amount) <= 0 || parseInt(amount) > player.buyIn}> Confirm Cash Out </Button> </div> );
+    };
+    const ErrorModalContent = () => ( <div className="text-center"> <p className="text-red">{modal.data.message}</p> <Button onClick={closeModal} variant="primary"> OK </Button> </div> );
+    const SettingsModalContent = () => {
+        const [url, setUrl] = useState(discordWebhookUrl);
+        const [localChipAmount, setLocalChipAmount] = useState(400);
+        const [localBahtAmount, setLocalBahtAmount] = useState(chipValue * 400);
+        const newChipValue = localChipAmount > 0 ? localBahtAmount / localChipAmount : 0;
     
-        const handleLocalChange = (playerId, value) => {
-            setLocalCounts(prev => ({ ...prev, [playerId]: value }));
+        const handleSave = async () => {
+            if (newChipValue > 0 && sessionActive) {
+                const sessionRef = doc(db, `artifacts/${appId}/public/data/poker-sessions`, sessionId);
+                await updateDoc(sessionRef, { chipValue: newChipValue });
+                setChipValue(newChipValue);
+            }
+            if (db) {
+                const settingsRef = doc(db, `artifacts/${appId}/public/data/global_settings/config`);
+                await setDoc(settingsRef, { discordWebhookUrl: url }, { merge: true });
+                setDiscordWebhookUrl(url);
+            }
+            closeModal();
         };
     
         return (
             <div className="form-group-stack">
-                <h3>Enter Final Chip Counts</h3>
-                <p className="text-sm">Enter the final number of chips each player has.</p>
-                <div className="final-counts-list">
-                    {players.map(player => (
-                        <div key={player.id} className="final-counts-item">
-                            <label htmlFor={`player-${player.id}`}>{player.name}</label>
-                            <input
-                                id={`player-${player.id}`}
-                                type="number"
-                                inputMode="numeric"
-                                pattern="[0-9]*"
-                                value={localCounts[player.id]}
-                                placeholder="0"
-                                onChange={(e) => handleLocalChange(player.id, e.target.value)}
-                            />
+                <div className="form-group">
+                    <label>Session Chip Value</label>
+                    <p className="text-sm">Set the exchange rate for the current game session.</p>
+                    <div className="chip-value-grid">
+                        <input type="number" value={localChipAmount} onChange={(e) => setLocalChipAmount(parseInt(e.target.value, 10))} />
+                        <span>chips =</span>
+                        <div className="input-group">
+                            <span>{currencySymbol}</span>
+                            <input type="number" value={localBahtAmount} onChange={(e) => setLocalBahtAmount(parseInt(e.target.value, 10))} />
                         </div>
-                    ))}
+                    </div>
+                    <p className="text-sm text-center">Calculated Value: 1 chip = {currencySymbol}{newChipValue.toFixed(2)}</p>
                 </div>
-                <Button onClick={() => handleEndGameCalculation(localCounts)} variant="danger">
-                    Calculate Final Results
-                </Button>
+                <div className="form-group">
+                    <label>Global Discord Webhook</label>
+                    <input type="text" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="Paste Discord Webhook URL here"/>
+                </div>
+                <Button onClick={handleSave} variant="primary">Save Settings</Button>
             </div>
         );
-      };
-      const ErrorModalContent = () => ( <div className="text-center"> <p className="text-red">{modal.data.message}</p> <Button onClick={closeModal} variant="primary"> OK </Button> </div> );
-      const SettingsModalContent = () => { /* ... unchanged ... */ return <div>Settings content here</div>};
-      const EditPlayerModalContent = () => { const player = modal.data; const [promptpay, setPromptpay] = useState(player.promptpayId || ''); return (<div className="form-group-stack"> <div className="form-group"> <label>PromptPay ID for {player.name}</label> <input type="text" value={promptpay} onChange={(e) => setPromptpay(e.target.value)} placeholder="e.g., 0812345678"/> </div> <Button onClick={() => handleUpdatePlayer(player.id, { promptpayId: promptpay })} variant="primary">Save PromptPay ID</Button> </div>); };
-      const QrCodeModalContent = () => { const { url, from, to, amount } = modal.data; return (<div className="text-center"> <h3> <span className="text-red">{from}</span> pays <span className="text-green">{to}</span> </h3> <img src={url} alt="PromptPay QR Code" className="qr-code"/> <p className="qr-amount">{formatMoney(amount)}</p> </div>); };
-      const NoQrCodeModalContent = () => { const { from, to, amount } = modal.data; return (<div className="text-center form-group-stack"> <AlertTriangle className="icon-lg text-yellow"/> <h3>No PromptPay ID for <strong>{to}</strong></h3> <p>Please have <strong>{from}</strong> transfer <strong>{formatMoney(amount)}</strong> manually.</p> <Button onClick={closeModal} variant="primary">OK</Button> </div>); };
-      const ConsoleLog = () => ( <div className={`console-log ${showConsole ? 'show' : ''}`}> <div> <div className="console-header"> <h3>Transaction Log</h3> <button onClick={() => setShowConsole(false)}><X size={24}/></button> </div> <ul className="console-body"> {transactionLog.map(log => ( <li key={log.id}> <span>{new Date(log.timestamp).toLocaleTimeString()}:</span> {log.ip && <span className="log-ip">[{log.ip}]</span>} <span className="log-type">{log.type}</span> {log.player && <span>Player: {log.player}</span>} {log.amount && <span>Amount: {log.amount}</span>} {log.source && <span>Source: {log.source}</span>} {log.message && <span>{log.message}</span>} </li> ))} </ul> </div> </div> );
+    };
+    const EditPlayerModalContent = () => {
+        const player = modal.data;
+        const [promptpay, setPromptpay] = useState(player.promptpayId || '');
+        return (<div className="form-group-stack"> <div className="form-group"> <label>PromptPay ID for {player.name}</label> <input type="text" value={promptpay} onChange={(e) => setPromptpay(e.target.value)} placeholder="e.g., 0812345678"/> </div> <Button onClick={() => handleUpdatePlayer(player.id, { promptpayId: promptpay })} variant="primary">Save PromptPay ID</Button> </div>);
+    };
+    const QrCodeModalContent = () => {
+        const { url, from, to, amount } = modal.data;
+        return (<div className="text-center"> <h3> <span className="text-red">{from}</span> pays <span className="text-green">{to}</span> </h3> <img src={url} alt="PromptPay QR Code" className="qr-code"/> <p className="qr-amount">{formatMoney(amount)}</p> </div>);
+    };
+    const NoQrCodeModalContent = () => {
+        const { from, to, amount } = modal.data;
+        return (<div className="text-center form-group-stack"> <AlertTriangle className="icon-lg text-yellow"/> <h3>No PromptPay ID for <strong>{to}</strong></h3> <p>Please have <strong>{from}</strong> transfer <strong>{formatMoney(amount)}</strong> manually.</p> <Button onClick={closeModal} variant="primary">OK</Button> </div>);
+    };
 
+    // --- MAIN RETURN ---
     return (
         <div className="app-container">
             <header>
@@ -875,19 +874,13 @@ function MainApp({ currentUser, userProfile, setUserProfile, auth, db, isAdmin, 
             </header>
             
             <main>
-                {view === 'admin' ? (
-                    renderAdminPanel()
-                ) : view === 'blinds' ? (
-                    renderBlindsTimer()
-                ) : view === 'stats' ? (
-                    <StatsView db={db} appId={appId} setView={setView} formatMoney={formatMoney} />
-                ) : view === 'waiting-for-counts' ? ( // FIXED: Use the new waiting view
-                    renderWaitingForCounts()
-                ) : !sessionActive ? (
-                    renderSessionManager()
-                ) : finalCalculations ? (
-                    renderSummary()
-                ) : (
+                {view === 'admin' ? renderAdminPanel()
+                 : view === 'blinds' ? renderBlindsTimer()
+                 : view === 'stats' ? <StatsView db={db} appId={appId} setView={setView} currencySymbol={currencySymbol} />
+                 : view === 'final-counts' ? <FinalCountsView sessionData={sessionData} players={players} currentUser={currentUser} isAdmin={isAdmin} isGameMaker={isGameMaker} db={db} appId={appId} sessionId={sessionId} handleEndGameCalculation={handleEndGameCalculation} />
+                 : !sessionActive ? renderSessionManager()
+                 : finalCalculations ? renderSummary()
+                 : (
                     <>
                         {isLoadingSession ? <p className="loading-text">Loading Session...</p> : 
                         <>
@@ -902,10 +895,9 @@ function MainApp({ currentUser, userProfile, setUserProfile, auth, db, isAdmin, 
                         </>
                         }
                     </>
-                )}
+                 )
+                }
             </main>
-            
-            {showConsole && <ConsoleLog />}
             
             <Modal 
                 isOpen={modal.isOpen} 
@@ -914,7 +906,6 @@ function MainApp({ currentUser, userProfile, setUserProfile, auth, db, isAdmin, 
                     modal.type === 'buy-in' ? 'Buy Chips' :
                     modal.type === 'self-buy-in' ? 'Join Game & Buy-in' :
                     modal.type === 'cash-out' ? 'Cash Out' :
-                    modal.type === 'end-game' ? 'End Game' :
                     modal.type === 'error' ? 'Error' :
                     modal.type === 'settings' ? 'Settings' :
                     modal.type === 'profile' ? 'User Profile' :
@@ -927,7 +918,6 @@ function MainApp({ currentUser, userProfile, setUserProfile, auth, db, isAdmin, 
                 {modal.type === 'buy-in' && <BuyInModalContent />}
                 {modal.type === 'self-buy-in' && <SelfBuyInModalContent />}
                 {modal.type === 'cash-out' && <CashOutModalContent />}
-                {modal.type === 'end-game' && <EndGameModalContent />}
                 {modal.type === 'error' && <ErrorModalContent />}
                 {modal.type === 'settings' && <SettingsModalContent />}
                 {modal.type === 'profile' && <ProfileModalContent currentUser={currentUser} userProfile={userProfile} setUserProfile={setUserProfile} db={db} appId={appId} closeModal={closeModal} />}
@@ -939,7 +929,6 @@ function MainApp({ currentUser, userProfile, setUserProfile, auth, db, isAdmin, 
     );
 }
 
-// --- Profile Modal Component ---
 const ProfileModalContent = ({ currentUser, userProfile, setUserProfile, db, appId, closeModal }) => {
     const [displayName, setDisplayName] = useState(userProfile?.displayName || '');
     const [notificationStatus, setNotificationStatus] = useState('unknown');
@@ -958,11 +947,57 @@ const ProfileModalContent = ({ currentUser, userProfile, setUserProfile, db, app
         setUserProfile(newProfile);
         closeModal();
     };
+
+    const urlBase64ToUint8Array = (base64String) => {
+        const padding = '='.repeat((4 - base64String.length % 4) % 4);
+        const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+        const rawData = window.atob(base64);
+        const outputArray = new Uint8Array(rawData.length);
+        for (let i = 0; i < rawData.length; ++i) {
+            outputArray[i] = rawData.charCodeAt(i);
+        }
+        return outputArray;
+    };
     
-    // Note: Push notifications require a registered service worker and a VAPID key.
-    // This function provides the client-side logic.
-    const enableNotifications = async () => { /* ... unchanged ... */ };
-    const urlBase64ToUint8Array = (base64String) => { /* ... unchanged ... */ };
+    const enableNotifications = async () => {
+        if (!('Notification' in window) || !('serviceWorker' in navigator) || !('PushManager' in window)) {
+            alert('Push notifications are not supported in your browser.');
+            return;
+        }
+
+        setIsEnablingNotifications(true);
+        
+        try {
+            const permission = await Notification.requestPermission();
+            setNotificationStatus(permission);
+            
+            if (permission === 'granted') {
+                const registration = await navigator.serviceWorker.ready;
+                const vapidPublicKey = import.meta.env.VITE_VAPID_PUBLIC_KEY;
+                
+                if (!vapidPublicKey) {
+                    throw new Error("VAPID public key is missing from environment variables (VITE_VAPID_PUBLIC_KEY).");
+                }
+                
+                const subscription = await registration.pushManager.subscribe({
+                    userVisibleOnly: true,
+                    applicationServerKey: urlBase64ToUint8Array(vapidPublicKey)
+                });
+                
+                const userDocRef = doc(db, `artifacts/${appId}/public/data/users/${currentUser.uid}`);
+                const newProfileData = { ...userProfile, displayName, notificationSubscription: subscription.toJSON() };
+                await setDoc(userDocRef, newProfileData, { merge: true });
+                setUserProfile(newProfileData);
+                
+                alert('Notifications enabled successfully!');
+            }
+        } catch (error) {
+            console.error('Error enabling notifications:', error);
+            alert(`Failed to enable notifications: ${error.message}`);
+        } finally {
+            setIsEnablingNotifications(false);
+        }
+    };
     
     return (
         <div className="form-group-stack">
@@ -999,4 +1034,3 @@ const ProfileModalContent = ({ currentUser, userProfile, setUserProfile, db, app
         </div>
     );
 };
-// FIXED: Removed the stray, duplicate return statement that was here.
