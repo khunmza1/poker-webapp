@@ -971,8 +971,8 @@ const ProfileModalContent = ({ currentUser, userProfile, setUserProfile, db, mes
                 console.log("Notification permission granted.");
                 
                 const vapidKey = import.meta.env.VITE_VAPID_PUBLIC_KEY;
-                if (!vapidKey) {
-                    throw new Error("VAPID public key is missing from environment variables (VITE_VAPID_PUBLIC_KEY).");
+                if (!vapidKey || vapidKey.trim() === '') {
+                    throw new Error("VAPID public key is missing or empty. Please set VITE_VAPID_PUBLIC_KEY in your .env file. You can find this key in your Firebase project settings under Cloud Messaging -> Web Push certificates.");
                 }
 
                 // Get the token
